@@ -1,0 +1,27 @@
+llm:
+  provider: minimax
+  minimax_model: MiniMax-M2.5
+  claude_model: claude-sonnet-4-20250514
+  openai_model: gpt-4o
+
+image:
+  provider: jimeng
+  jimeng_model: doubao-seedream-5-0-260128
+  jimeng_image_size: 2K
+
+video:
+  provider: seedance
+  seedance_model: doubao-seedance-1-5-pro-251215
+  default_duration: 5.0
+  default_aspect_ratio: "9:16"
+
+vision:
+  provider: doubao
+  doubao_model: doubao-1-5-vision-pro-32k-250115
+  sample_frames: 8
+
+project:
+  default_platform: douyin
+  default_aspect_ratio: "9:16"
+  default_duration: 30
+  default_language: zh

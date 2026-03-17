@@ -1,0 +1,118 @@
+#!/usr/bin/env python
+"""
+Takone — AI Video Director
+
+Usage:
+  takone              - Start conversation (new or resume)
+  takone <project>    - Resume specific project
+  takone --help       - Show help
+"""
+
+import sys
+import os
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).parent
+
+# Add project root to path for package imports
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from agents.config import Colors, PROJECTS_DIR  # noqa: E402
+
+
+# ── Main entry point ──────────────────────────────────────────────────
+
+def _start(project_name: str = None):
+    """Start the director agent."""
+    try:
+        from agents.director import VideoDirector
+    except ImportError as e:
+        print(f"{Colors.RED}Error: {e}{Colors.ENDC}")
+        print(f"{Colors.YELLOW}Please install dependencies: pip install anthropic openai python-dotenv{Colors.ENDC}\n")
+        sys.exit(1)
+
+    try:
+        director = VideoDirector(project_name=project_name)
+        director.run()
+    except ValueError as e:
+        print(f"{Colors.RED}{e}{Colors.ENDC}")
+        sys.exit(1)
+
+
+def show_help():
+    """Show help message."""
+    bold_yellow = f"{Colors.BOLD}{Colors.YELLOW}"
+    end = Colors.ENDC
+    dim = Colors.DIM
+    bold = Colors.BOLD
+    cyan = Colors.CYAN
+
+    # Same starfish as in-app banner
+    print(f"""
+  {dim}╭─{end}{bold_yellow} Takone {end}{dim}──────────────────────────────────────────────────╮{end}
+  {dim}│{end}                            {dim}│{end}                              {dim}│{end}
+  {dim}│{end}         {bold_yellow}██{end}                {dim}│{end}  {cyan}Start{end}                        {dim}│{end}
+  {dim}│{end}        {bold_yellow}████{end}              {dim}│{end}  {bold}takone{end}        {dim}Start conversation{end}  {dim}│{end}
+  {dim}│{end}       {bold_yellow}██████{end}             {dim}│{end}  {bold}takone <name>{end}  {dim}Resume project{end}    {dim}│{end}
+  {dim}│{end}  {bold_yellow}████████████████{end}         {dim}│{end}                              {dim}│{end}
+  {dim}│{end}   {bold_yellow}▀████████████▀{end}          {dim}│{end}  {dim}Type /help for all commands{end}     {dim}│{end}
+  {dim}│{end}     {bold_yellow}██████████{end}            {dim}│{end}  {dim}Press Enter = let the director freestyle{end}   {dim}│{end}
+  {dim}│{end}    {bold_yellow}████    ████{end}           {dim}│{end}                              {dim}│{end}
+  {dim}│{end}   {bold_yellow}██▀        ▀██{end}         {dim}│{end}                              {dim}│{end}
+  {dim}│{end}   {bold}AI Video Director{end}            {dim}│{end}                              {dim}│{end}
+  {dim}╰─────────────────────────────────────────────────────────╯{end}
+""")
+    print(f"  {cyan}Available commands:{end}")
+    cmds = [
+        ("/int [instruction]", "Interrupt flow, optionally with new instruction"),
+        ("/new", "Save current, start new project"),
+        ("/resume [name]", "Switch to another project"),
+        ("/status", "Show current project status"),
+        ("/list", "List all projects"),
+        ("/login [platform]", "Login to platform (default: Douyin)"),
+        ("/learn <keyword> [platform]", "Search & analyze viral videos"),
+        ("/help", "Show help"),
+        ("/quit", "Save and quit"),
+    ]
+    for cmd, desc in cmds:
+        print(f"    {bold}{cmd:24}{end} {dim}{desc}{end}")
+        if cmd.startswith("/learn"):
+            print(f"    {dim}{'':24} Platforms: douyin bilibili xiaohongshu youtube{end}")
+            print(f"    {dim}{'':24} Report auto-injected into conversation{end}")
+    print()
+
+
+def main():
+    """Main entry point."""
+    if len(sys.argv) < 2:
+        _start()
+        return
+
+    command = sys.argv[1]
+
+    if command in ("help", "--help", "-h"):
+        show_help()
+    else:
+        _start(project_name=command)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Ensure terminal is restored from split mode
+        try:
+            from agents.tui import _split_terminal
+            _split_terminal.exit()
+        except Exception:
+            pass
+        print(f"\n{Colors.YELLOW}  Interrupted{Colors.ENDC}\n")
+        sys.exit(0)
+    except Exception as e:
+        try:
+            from agents.tui import _split_terminal
+            _split_terminal.exit()
+        except Exception:
+            pass
+        print(f"\n{Colors.RED}  Error: {e}{Colors.ENDC}\n")
+        sys.exit(1)
