@@ -92,11 +92,23 @@ install_deps() {
     # -- pipx (for isolated install) --
     if ! has pipx; then
         info "Installing pipx..."
-        python3 -m pip install --user pipx 2>/dev/null || python3 -m ensurepip --default-pip && python3 -m pip install --user pipx
-        python3 -m pipx ensurepath 2>/dev/null || true
+        if [[ "$PLATFORM" == "macos" ]] && has brew; then
+            brew install pipx
+        elif [[ "$PLATFORM" == "linux" ]]; then
+            if has apt-get; then
+                sudo apt-get install -y -qq pipx
+            elif has dnf; then
+                sudo dnf install -y pipx
+            else
+                python3 -m pip install --user --break-system-packages pipx 2>/dev/null \
+                    || python3 -m pip install --user pipx 2>/dev/null \
+                    || true
+            fi
+        fi
+        pipx ensurepath 2>/dev/null || true
         export PATH="$HOME/.local/bin:$PATH"
     fi
-    ok "pipx"
+    if has pipx; then ok "pipx"; fi
 }
 
 install_python() {
@@ -159,12 +171,11 @@ install_takone() {
         cd "$INSTALL_DIR"
     fi
 
-    # Install with pipx for isolated environment
+    # Install with pipx or fallback to venv
     info "Installing Takone package..."
     if has pipx; then
-        pipx install -e "$INSTALL_DIR[all]" --force 2>/dev/null || {
-            # Fallback: pip install in venv
-            info "pipx failed, falling back to pip..."
+        pipx install "$INSTALL_DIR[all]" --force 2>/dev/null || {
+            info "pipx failed, falling back to venv..."
             pip_install "$INSTALL_DIR"
         }
     else
@@ -187,7 +198,8 @@ install_takone() {
 pip_install() {
     local dir="$1"
     python3 -m venv "$dir/.venv"
-    "$dir/.venv/bin/pip" install -e "$dir[all]" --quiet
+    "$dir/.venv/bin/pip" install --upgrade pip setuptools --quiet
+    "$dir/.venv/bin/pip" install "$dir[all]" --quiet
 
     # Create wrapper script
     local BIN_DIR="$HOME/.local/bin"
