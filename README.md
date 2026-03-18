@@ -21,8 +21,6 @@
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status" />
 </p>
 
----
-
 Takone is an AI agent that **directs the entire video production pipeline autonomously**. Describe your vision, and it handles scriptwriting, storyboarding, image/video generation, quality review, and final assembly — all through a single CLI session.
 
 > *One vision. One take. Takone.*

@@ -6,7 +6,8 @@
 #  Usage:
 #    curl -fsSL https://raw.githubusercontent.com/wormholeportal/takone/main/install.sh | bash
 #    # or
-#    bash install.sh
+#    bash install.sh            # install from GitHub
+#    bash install.sh --local    # install from current directory (dev mode)
 #
 #  Options (env vars):
 #    TAKONE_INSTALL_DIR   Where to clone (default: ~/.takone)
@@ -161,9 +162,15 @@ install_ffmpeg() {
 install_takone() {
     local INSTALL_DIR="${TAKONE_INSTALL_DIR:-$HOME/.takone}"
 
-    if [[ -d "$INSTALL_DIR" ]]; then
+    if [[ "$LOCAL_MODE" == true ]]; then
+        # --local: install from current directory (dev mode)
+        local SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        info "Installing from local source: $SRC_DIR"
+        INSTALL_DIR="$SRC_DIR"
+    elif [[ -d "$INSTALL_DIR" ]]; then
         info "Updating existing installation at $INSTALL_DIR..."
         cd "$INSTALL_DIR"
+        git reset --hard HEAD --quiet 2>/dev/null || true
         git pull --quiet
     else
         info "Cloning Takone..."
@@ -188,10 +195,12 @@ install_takone() {
     info "Installing Chromium browser (for web research)..."
     playwright install chromium 2>/dev/null && ok "Chromium installed" || warn "Chromium install failed — run 'playwright install chromium' manually"
 
-    # Copy .env.example if .env doesn't exist
-    if [[ ! -f "$INSTALL_DIR/.env" && -f "$INSTALL_DIR/.env.example" ]]; then
-        cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
-        warn "Created .env from template — edit ${BOLD}$INSTALL_DIR/.env${RESET} to add your API keys"
+    # Ensure ~/.takone/.env exists (standard config location)
+    local CONFIG_DIR="$HOME/.takone"
+    mkdir -p "$CONFIG_DIR"
+    if [[ ! -f "$CONFIG_DIR/.env" && -f "$INSTALL_DIR/.env.example" ]]; then
+        cp "$INSTALL_DIR/.env.example" "$CONFIG_DIR/.env"
+        warn "Created .env from template — edit ${BOLD}$CONFIG_DIR/.env${RESET} to add your API keys"
     fi
 }
 
@@ -239,6 +248,12 @@ add_to_path() {
 
     export PATH="$bin_dir:$PATH"
 }
+
+# ── Parse args ────────────────────────────────────────────────
+LOCAL_MODE=false
+if [[ "${1:-}" == "--local" ]]; then
+    LOCAL_MODE=true
+fi
 
 # ── Main ─────────────────────────────────────────────────────
 main() {

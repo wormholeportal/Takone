@@ -88,9 +88,13 @@ class VideoDirector:
     """
 
     def __init__(self, project_name: str = None):
-        env_file = Path(__file__).resolve().parent.parent / ".env"
-        if env_file.exists():
-            _load_env_file(env_file)
+        # Load .env: ~/.takone/.env first (user install dir), then repo-local as fallback
+        home_env = Path.home() / ".takone" / ".env"
+        local_env = Path(__file__).resolve().parent.parent / ".env"
+        if home_env.exists():
+            _load_env_file(home_env)
+        elif local_env.exists():
+            _load_env_file(local_env)
 
         setup_logging()
         self.config = load_config()

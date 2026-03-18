@@ -10,8 +10,10 @@ import yaml
 
 # Base paths
 DIRECTOR_ROOT = Path(__file__).parent.parent
-PROJECTS_DIR = DIRECTOR_ROOT / "projects"
 SKILLS_DIR = DIRECTOR_ROOT / "skills"
+
+# Projects directory: TAKONE_PROJECTS env var > ~/Takone
+PROJECTS_DIR = Path(os.getenv("TAKONE_PROJECTS", Path.home() / "Takone"))
 
 # Ensure directories exist
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
