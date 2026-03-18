@@ -2210,11 +2210,11 @@ class VideoDirector:
             ("/help", "Show help"),
             ("/quit", "Save and exit"),
         ]
+        col = max(len(c) for c, _ in cmds) + 2
         for cmd, desc in cmds:
-            print(f"    {B}{cmd:24}{E} {D}{desc}{E}")
+            print(f"    {B}{cmd:<{col}}{E} {D}{desc}{E}")
             if cmd.startswith("/learn"):
-                print(f"    {D}{'':24} Platforms: douyin bilibili xiaohongshu youtube{E}")
-                print(f"    {D}{'':24} Report auto-injected into conversation for follow-up{E}")
+                print(f"    {D}{'':<{col}} Platforms: douyin bilibili xiaohongshu youtube{E}")
         print(f"\n  {D}Press Enter = let the director freestyle | Supports reference image/video paths{E}\n")
         return "handled"
 
@@ -2386,57 +2386,21 @@ class VideoDirector:
         bold_yellow = f"{Colors.BOLD}{Colors.YELLOW}"
         end = Colors.ENDC
         dim = Colors.DIM
-        cyan = Colors.CYAN
-        bold = Colors.BOLD
 
-        left_col_width, right_col_width = 26, 28
-
-        # ── Five-pointed star ──
-        star = [
-            f"         {bold_yellow}██{end}",
-            f"        {bold_yellow}████{end}",
-            f"       {bold_yellow}██████{end}",
-            f"  {bold_yellow}████████████████{end}",
-            f"   {bold_yellow}▀████████████▀{end}",
-            f"     {bold_yellow}██████████{end}",
-            f"    {bold_yellow}████    ████{end}",
-            f"   {bold_yellow}██▀        ▀██{end}",
-        ]
-        left = [""] + star + [f"   {bold}AI Video Director{end}"]
-
-        # ── Right column ──
-        projects = self._list_project_names()
-        right = [""]
-        if projects:
-            right.append(f"{cyan}Recent projects{end}")
-            for name in projects[:4]:
-                display = name if len(name) <= right_col_width - 4 else name[:right_col_width - 5] + '…'
-                right.append(f"  {dim}{display}{end}")
-        else:
-            right.append(f"{dim}No projects yet{end}")
-            right.append(f"{dim}Type /new to create a project{end}")
-        right.append("")
-        right.append(f"{dim}{self.config.llm.provider} / {self.model}{end}")
-        right.append("")
-        right.append(f"{dim}Type /help to see all commands{end}")
-
-        # ── Equalize heights ──
-        max_height = max(len(left), len(right))
-        left += [""] * (max_height - len(left))
-        right += [""] * (max_height - len(right))
-
-        # ── Draw box ──
-        inner_width = left_col_width + 3 + right_col_width
-        title = " Takone "
-        bar_r = inner_width + 2 - 2 - len(title)
-
+        # ── ASCII banner (matches install.sh) ──
         print()
-        print(f"  {dim}╭─{end}{bold}{bold_yellow}{title}{end}{dim}{'─' * bar_r}╮{end}")
-        for left_cell, right_cell in zip(left, right):
-            left_padded = _visual_pad(left_cell, left_col_width)
-            right_padded = _visual_pad(right_cell, right_col_width)
-            print(f"  {dim}│{end} {left_padded} {dim}│{end} {right_padded} {dim}│{end}")
-        print(f"  {dim}╰{'─' * (inner_width + 2)}╯{end}")
+        print(f"{bold_yellow}"
+              f"  ████████╗ █████╗ ██╗  ██╗ ██████╗ ███╗   ██╗███████╗\n"
+              f"  ╚══██╔══╝██╔══██╗██║ ██╔╝██╔═══██╗████╗  ██║██╔════╝\n"
+              f"     ██║   ███████║█████╔╝ ██║   ██║██╔██╗ ██║█████╗\n"
+              f"     ██║   ██╔══██║██╔═██╗ ██║   ██║██║╚██╗██║██╔══╝\n"
+              f"     ██║   ██║  ██║██║  ██╗╚██████╔╝██║ ╚████║███████╗\n"
+              f"     ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝"
+              f"{end}")
+        print(f"  {dim}AI Video Creation Agent — from concept to export{end}")
+        print()
+        print(f"  {dim}{self.config.llm.provider} / {self.model}{end}")
+        print(f"  {dim}Type /help to see all commands{end}")
         print()
 
         # Enter persistent split terminal (inline bottom decoration)

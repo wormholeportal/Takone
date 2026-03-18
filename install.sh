@@ -198,8 +198,12 @@ install_takone() {
 pip_install() {
     local dir="$1"
     python3 -m venv "$dir/.venv"
-    "$dir/.venv/bin/pip" install --upgrade pip setuptools --quiet
-    "$dir/.venv/bin/pip" install "$dir[all]" --quiet
+    # Upgrade pip first (Python 3.14 bundles an old pip that breaks build isolation)
+    "$dir/.venv/bin/python" -m pip install --upgrade pip --quiet 2>/dev/null || true
+    "$dir/.venv/bin/pip" install --upgrade "setuptools>=75.0" wheel --quiet
+    # --no-build-isolation: use the venv's setuptools directly, avoids the
+    # "Cannot import setuptools.backends._legacy" crash on Python 3.14
+    "$dir/.venv/bin/pip" install --no-build-isolation "$dir[all]" --quiet
 
     # Create wrapper script
     local BIN_DIR="$HOME/.local/bin"
