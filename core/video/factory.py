@@ -10,6 +10,7 @@ def create_video_gen(config):
             model=config.seedance_model,
             base_url=config.seedance_base_url,
             resolution=getattr(config, "seedance_resolution", "720p"),
+            generate_audio=getattr(config, "seedance_generate_audio", True),
         )
     elif config.provider == "minimax":
         from .minimax import MinimaxVideoGen

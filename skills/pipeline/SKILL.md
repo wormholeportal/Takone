@@ -1,128 +1,175 @@
 ---
 name: pipeline
-description: End-to-end video creation pipeline. Orchestrates all stages from creative concept to final video export.
+description: Feeling-first video creation pipeline. Four stages from inspiration to final export.
 ---
 
 # Video Pipeline
 
-Manage the complete lifecycle of video creation — from a vague creative idea to a publishable short video.
+Create short videos that make people stop scrolling. Four stages, feeling-first.
 
-## Pipeline Stages
+## The Four Stages
 
-| Stage | Skill | Input | Output |
-|-------|-------|-------|--------|
-| 0. Emotion Blueprint | `scriptwriter` | Creative idea | emotion_curve + memory_points + characters |
-| 1. Script + Visuals | `scriptwriter` | Emotion blueprint | `screenplay.yaml` (with narrative_beats + novel-level visual descriptions + character visual profiles) |
-| 2. Storyboard | `storyboard` | `screenplay.yaml` | `storyboard.yaml` (with cinematic_intent/emotional_intensity/breathing) |
-| 3. Prompts | `visualizer` | `storyboard.yaml` + `screenplay.yaml` | `prompts.json` |
-| 3.5 Design | `designer` | `prompts.json` | `assets/references/` |
-| 4. Generation | (code) | `prompts.json` + reference images | `assets/images/`, `assets/videos/` |
-| 5. Review | `reviewer` | Generated assets | `review.yaml` |
-| 6. Iteration | Loop back to Stage 3 | `review.yaml` | Updated assets |
-| 7. Assembly | (FFmpeg) | All video clips + storyboard.yaml | `output/final.mp4` (smart transitions/trimming) |
-| 8. Audio | (FFmpeg) | `output/final.mp4` + music file | `output/final_with_audio.mp4` |
+| Stage | What Happens | Input | Output |
+|-------|-------------|-------|--------|
+| 1. DISCOVER | Browse platforms, find references, define feeling | Creative idea | `feeling.yaml` + reference images |
+| 2. DESIGN | Write shot plan + generate character references | `feeling.yaml` + references | `shots.yaml` + `assets/design/*.png` |
+| 3. GENERATE | Generate variations per shot, compare and select best | `shots.yaml` + references | `assets/image/`, `assets/video/` |
+| 4. ASSEMBLE | FFmpeg assembly + audio mixing | Video clips + `shots.yaml` | `output/final.mp4` |
+
+**Research (`learn`) is available at ANY point — not just Stage 1.** Whenever you're unsure, go look it up.
+
+## Shot Budget (STRICTLY ENFORCED)
+
+| Target Duration | Max Shots | Variations Per Shot |
+|----------------|-----------|-------------------|
+| 5-15 seconds   | 1-3       | Generate 5, pick best |
+| 15-30 seconds  | 3-5       | Generate 3, pick best |
+| 30-60 seconds  | 5-8       | Generate 2, pick best |
+| 1-3 minutes    | 8-15      | Generate 2, pick best |
+
+**Exceeding these limits = planning failure.** Cut ruthlessly. 2 stunning shots are infinitely better than 8 mediocre ones. If your shot count exceeds the limit, combine or remove shots until it fits.
 
 ## Routing Rules
 
-Determine which stage to start from based on user intent:
+Determine where to start based on user intent:
 
-- **"I have a creative idea"** → Start from Stage 0 (design the emotion blueprint first, then write the script + visuals)
-- **"Here is my script"** → Start from Stage 2 (storyboard)
-- **"Help me write visual descriptions"** → Jump to Stage 1 (supplement/refine visual_description in screenplay.yaml)
-- **"Regenerate shot 3"** → Jump to a specific shot in Stage 4
-- **"Design character references first"** → Jump to Stage 3.5
-- **"Review and improve"** → Jump to Stage 5
-- **"Show me trending references"** → Call the search_reference tool
-- **"Export the final video"** → Jump to Stage 7
-- **"Add background music"** → Jump to Stage 8
+- **"I have a creative idea"** → Stage 1 (DISCOVER: research first, then create)
+- **"Here's my reference video"** → Stage 1, skip search, go straight to feeling extraction
+- **"Regenerate shot 3"** → Stage 3 for that specific shot
+- **"Export the final video"** → Stage 4
+- **"Add background music"** → Stage 4 (audio step)
 
-## Cross-Stage Consistency
+## Stage 1: DISCOVER — Find Your Feeling AND Your Angle
 
-Before advancing each stage, check:
+**This is MANDATORY. Never skip it.**
 
-1. **Visual anchors** — Color tone and style remain consistent across all shots
-2. **Temporal continuity** — Scene timelines connect logically
-3. **Aspect ratio** — All shots use the same aspect_ratio
-4. **Character consistency** — The same character/object maintains consistent appearance across different shots
-5. **Period consistency** — All props, architecture, and costumes match the story's historical setting
-6. **Shot continuity** — Adjacent shots' opening/closing states connect smoothly
+### Step 1: Narrative Research (do this FIRST)
 
-## Quality Gates
+For well-known stories, myths, or historical figures — research how others have told it:
+1. `learn_browse(action="search_videos", query="{concept}", platform="douyin")`
+2. Watch 5-10 versions. Note what they ALL do the same way — that's what you must NOT do.
+3. Ask: What angle has NOT been taken? Whose perspective is missing? What 3 seconds has no one shown?
 
-### Pre-Generation Gate (Stage 3 → 3.5 → 4)
+### Step 2: Visual Research
 
-**All checks must pass before generation begins; each may require multiple iterations:**
+1. `learn_browse(action="search_images", query="{concept} aesthetic")`
+2. Download the 3-5 best reference frames/images
+3. Analyze references with vision model: What feeling do they create? What technique drives it?
 
-**Creative Impact (Highest Priority — Before All Technical Checks!):**
-- [ ] screenplay.yaml contains emotion_curve with genuine fluctuation (not flat; valleys before climax)
-- [ ] screenplay.yaml contains at least 2 memory_points ("What will stick in the viewer's mind after watching?")
-- [ ] screenplay.yaml characters have inner_desire and arc (characters are not props)
-- [ ] storyboard.yaml every shot has cinematic_intent (intent first, then technique — not arbitrary framing)
-- [ ] storyboard.yaml every shot has emotional_intensity without 3+ consecutive identical values
-- [ ] storyboard.yaml every shot has breathing annotation with alternation (inhale → exhale pattern)
-- [ ] storyboard.yaml rhythm_relationship has no 3+ consecutive "continuation"
+### Step 3: Write `feeling.yaml`
 
-**Narrative Skeleton:**
-- [ ] screenplay.yaml contains narrative_beats (hook/setup/development/climax/resolution)
-- [ ] narrative_beats includes a hook (strong hook in the first 1-5s)
-- [ ] narrative_beats includes a climax (emotional peak)
-- [ ] Pacing varies between beats (not all at the same rhythm)
-- [ ] Total beat duration matches target duration
-- [ ] All scenes are linked to a beat via beat_ref (no wasted scenes)
+```yaml
+target_feeling: "The viewer should feel ___"
 
-**Script Quality:**
-- [ ] screenplay.yaml contains all three emotional foundations: emotion_curve, memory_points, characters
-- [ ] screenplay.yaml every scene has emotional_function and memory_point_ref (if applicable)
-- [ ] screenplay.yaml contains complete scene breakdowns with time annotations
-- [ ] screenplay.yaml all scene props/environments match the historical period (no anachronisms)
-- [ ] screenplay.yaml has a strong enough hook in the first 3 seconds
-- [ ] screenplay.yaml narrative structure has ups and downs (not a flat chronological account), with suspense and rhythm changes
-- [ ] screenplay.yaml has no "wasted scenes" — every scene advances the narrative
-- [ ] screenplay.yaml time allocation is reasonable with no dragging sections
+narrative_angle:                                    # MANDATORY — define before anything visual
+  conventional_telling: "How most people tell this story (1 sentence)"
+  this_telling: "What makes THIS version different (1 sentence)"
+  the_subversion: "The one thing the viewer does NOT expect"
 
-**Visual Description Quality (Embedded in screenplay.yaml):**
-- [ ] Every scene has a 200-600 word visual_description (novel-level continuous prose)
-- [ ] Memory anchor scenes have the most detailed descriptions (400-600 words)
-- [ ] Each character in characters has a visual_definition (50-100 word visual profile)
-- [ ] The same character's appearance/costume description in visual_description across scenes matches their visual_definition
-- [ ] Adjacent scenes' temporal_change (opening_state/closing_state) can naturally connect
-- [ ] All descriptions contain no anachronistic elements
-- [ ] Color/lighting tone matches the emotion_curve and visual_tone
+references:
+  - image: "assets/learn/ref_01.png"
+    why: "The slow reveal through mist creates tension"
+visual_dna:
+  color_mood: "cold, blue-gray dominant"
+  pacing: "slow build → burst"
+  first_3_seconds: "static frame, then sudden motion"
+anti_patterns:
+  - "no cartoon look"
+  - "no over-saturated colors"
+```
 
-**Storyboard Quality:**
-- [ ] storyboard.yaml every shot has beat_ref (linked to the narrative skeleton)
-- [ ] storyboard.yaml every shot has pacing_intent with fast/slow variation (not all medium)
-- [ ] storyboard.yaml every shot has clear visual description
-- [ ] storyboard.yaml every shot has opening_state and closing_state
-- [ ] storyboard.yaml adjacent shots' start/end states can naturally connect
-- [ ] storyboard.yaml all key_elements match the historical period
-- [ ] storyboard.yaml hook shots are ≤ 5s, use_duration allocation has rhythmic variation
-- [ ] storyboard.yaml every shot has cut_on annotation (action/emotion/rhythm/visual_match)
-- [ ] storyboard.yaml transitions are appropriate (hard cuts for action, dissolves/fades for emotional segments), every shot has transition_out
+**Research as a Reflex** — Also available at any later stage:
 
-**Style Consistency:**
-- [ ] prompts.json style_anchor is sufficiently detailed (50-100 words, covering render/color/lighting/texture/exclusions)
-- [ ] prompts.json all shot prompts fully include the style_anchor
-- [ ] Reference image style matches the style_anchor (no cartoon characters + photorealistic scenes dissonance)
-- [ ] Reference images have been fully generated (assets/references/)
+| Situation | Action |
+|-----------|--------|
+| Unsure about historical details | `learn_browse(action="search_web", query="...", platform="baike")` |
+| Can't picture the style | `learn_browse(action="search_images", query="...")` |
+| Need pacing reference | `learn_browse(action="search_videos", query="...", platform="bilibili")` |
+| Found something great | `learn_download(url="...", media_type="image")` |
 
-**Prompt Quality:**
-- [ ] prompts.json every shot has a prompt optimized for the target model
-- [ ] prompts.json all prompts contain no anachronistic elements
-- [ ] prompts.json same character descriptions are consistent across different prompts
-- [ ] prompts.json video prompts include opening and closing state descriptions
-- [ ] prompts.json all involved characters/scenes have specified reference_images
+### Gate: Kill the Obvious
 
-### Post-Generation Gate (Stage 4 → 5 → 7)
+**Before moving to Stage 2, answer this:**
 
-- [ ] All generated images/videos confirmed through manual or AI review
-- [ ] check_continuity verifies consistency across all adjacent shots
-- [ ] Final video duration and aspect ratio meet target platform requirements
+> If I described this video to a friend in one sentence, would they say "I've seen that before"?
+
+If yes — go back and find a different angle. Beauty is not an angle. Chronological retelling is not an angle. "The same story but with better visuals" is not an angle.
+
+## Stage 2: DESIGN — Write Your Shots + Generate Character References
+
+Load `scriptwriter` + `visualizer` + `designer` skills. Output `shots.yaml` + character reference images.
+
+### Contrast Mapping (do this BEFORE writing shots)
+
+List the shift between each adjacent pair of shots. Every pair must differ in at least TWO dimensions:
+- **Scale**: close-up ↔ wide
+- **Energy**: still ↔ violent motion
+- **Temperature**: warm ↔ cold
+- **Density**: sparse/empty ↔ packed with detail
+- **Perspective**: whose eyes are we looking through?
+
+If two adjacent shots have no shift — merge them or cut one.
+
+### Key Requirements
+- Every shot has a `feeling` field — this is the creative anchor
+- Prompts must be specific (photographer language: lens, lighting, color)
+- `style_anchor` (50-100 words) in every prompt
+- Characters need `reference_images` for consistency
+- For ≤15s videos: skip elaborate structure. Just make every frame stunning.
+
+**After writing shots.yaml, apply the Scroll-Stop Test:** "Would I stop scrolling for this?" If not, rewrite.
+
+### MANDATORY: Generate ALL Reference Images (before leaving Stage 2)
+
+After shots.yaml is finalized:
+1. Load `designer` skill
+2. For each character in `characters` list → `generate_reference(ref_type="character", ref_id="{id}", prompt="...", aspect_ratio="3:2")`
+   - Prompt must include: full style_anchor, anatomy keywords, detailed physical description, clothing, view specification
+3. For each distinct scene/location → `generate_reference(ref_type="scene", ref_id="{scene_id}", prompt="...", aspect_ratio="9:16")`
+   - Prompt must include: full style_anchor, lighting, color tone, time of day, environment details
+4. Add all generated reference IDs to each shot's `reference_images` (both characters AND scenes in that shot)
+5. Verify all `reference_images` entries have corresponding files in `assets/design/`
+
+**Do NOT proceed to Stage 3 without ALL references. `generate_image` will BLOCK if references are missing.**
+
+## Stage 3: GENERATE — Create and Select
+
+1. **Pre-check** — Verify all reference images (characters + scenes) exist in `assets/design/`. If missing, generate them first.
+2. **Multiple variations per shot** — Use `variations` parameter on generate_image
+3. **Compare and select** — Use `compare_shots` to pick the best version
+4. **Generate video** from the best keyframe
+5. **Evaluate** — Use `evaluate_shot`. If it doesn't feel right, regenerate (max 3 attempts)
+
+## Stage 4: ASSEMBLE
+
+1. `assemble_video` — reads shots.yaml for order, trimming, transitions
+2. `add_audio_track` if additional background music needed (Seedance 1.5 already generates audio with each video clip — dialogue, sound effects, and music are baked into the video during Stage 3 via video_prompt)
+3. Final review: watch the assembled piece. Does it work as a whole? Does it tell a story?
+
+## Quality Gate: The Scroll-Stop Test
+
+**At every stage, one question:**
+
+> "If this appeared in my Douyin feed right now, would I stop scrolling and watch?"
+
+- **Yes** → proceed
+- **No** → figure out why, fix it
+- **Not sure** → compare against your reference videos. What's the gap?
+
+This replaces all checklists. Trust your creative judgment.
+
+## Cross-Shot Consistency
+
+Before generation:
+- style_anchor appears in all prompts
+- Character descriptions consistent across shots
+- Adjacent shots' opening/closing states connect naturally
+- All elements match the story's period/setting
+- Same aspect_ratio throughout
 
 ## Generation Strategy
 
-Recommended generation workflow (rather than all at once):
-
-1. **Images first, then video** — Use Seedream to generate keyframe images, confirm the visuals, then use Seedance to generate video
-2. **Shot by shot** — Don't generate all shots at once; do them one at a time for easier iteration
-3. **Reference-driven** — If the user has reference images, use image_to_image to maintain style consistency
+1. **Images first, then video** — Confirm the visual before animating
+2. **Shot by shot** — Don't batch generate; iterate per shot
+3. **Reference-driven** — Use image-to-image for consistency
+4. **Multiple variations** — Never accept the first generation; always compare options

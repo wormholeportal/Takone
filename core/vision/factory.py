@@ -18,7 +18,25 @@ def create_vision(config):
             model=vision_cfg.doubao_model,
             base_url=llm_cfg.ark_base_url,
         )
-    elif vision_cfg.provider == "gpt4o":
+    elif vision_cfg.provider == "kimi":
+        from .kimi import KimiVision
+        return KimiVision(
+            api_key=llm_cfg.kimi_api_key,
+            model=vision_cfg.kimi_model,
+        )
+    elif vision_cfg.provider == "zhipu":
+        from .zhipu import ZhipuVision
+        return ZhipuVision(
+            api_key=llm_cfg.zhipu_api_key,
+            model=vision_cfg.zhipu_model,
+        )
+    elif vision_cfg.provider == "qwen":
+        from .qwen import QwenVision
+        return QwenVision(
+            api_key=llm_cfg.qwen_api_key,
+            model=vision_cfg.qwen_model,
+        )
+    elif vision_cfg.provider in ("openai", "gpt4o"):
         from .gpt4o import GPT4oVision
         return GPT4oVision(
             api_key=llm_cfg.openai_api_key,

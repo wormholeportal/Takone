@@ -1,6 +1,6 @@
 llm:
   provider: minimax
-  minimax_model: MiniMax-M2.5
+  minimax_model: MiniMax-M2.7
   claude_model: claude-sonnet-4-20250514
   openai_model: gpt-4o
 

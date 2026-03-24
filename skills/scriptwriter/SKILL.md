@@ -1,239 +1,212 @@
 ---
 name: scriptwriter
-description: Transform creative concepts into structured screenplays optimized for AI video generation.
+description: Feeling-first creation — transform ideas into shots.yaml with inline prompts, minimal structure, maximum impact.
 ---
 
 # Scriptwriter
 
-Transform creative ideas into structured screenplays with precise time annotations, visual descriptions, and audio cues.
+Create shots that make people stop scrolling. Start with feeling, end with shots.yaml.
 
-## Methodology
+## Feeling-First Creation
 
-### Progressive Refinement
+### The Process
 
-1. **Core Concept** — A one-sentence statement of what this video aims to express (1-2 sentences)
-2. **Emotion Curve (emotion_curve)** — **Before writing any scenes, first map out the emotional blueprint of the entire video**
-   - Mark 5-8 time points with emotional intensity (0-10) and emotion type
-   - The curve must have ups and downs — flat lines are forbidden (constant medium intensity of 4-6 = a lullaby)
-   - Classic pattern: low → medium → **valley** → peak → decline (the valley before the climax is key to amplifying impact)
-   - The emotion curve is the foundation for all subsequent decisions — beat pacing, shot duration, music choices all derive from the curve
-3. **Memory Anchors (memory_points)** — **First design 2-3 moments the audience cannot forget**
-   - Each memory point = an extreme visual + emotional combination
-   - Not "a beautiful shot" but "an image that lingers in your mind after watching"
-   - The entire story revolves around memory points; other scenes pave the way to or wind down from them
-   - Examples: "parents turning into pigs" in Spirited Away, "arms spread in the rain" in Shawshank Redemption, "Remember Me" in Coco
-4. **Character Psychology (characters)** — **Characters are not props; they have souls**
-   - Inner desire — Not external goals ("find the treasure"), but internal needs ("to be recognized", "to find belonging")
-   - Core conflict — What prevents the desire? Can be external or internal
-   - Arc — What internal change does the character undergo from beginning to end?
-   - Signature detail — A specific action/object/expression that represents the character's soul
-5. **Narrative Skeleton (narrative_beats)** — **The most critical step; must be completed before writing scenes**
-   - First define the story's beats: hook → setup → development → climax → resolution
-   - Annotate each beat with pacing (fast/medium/slow/building) and target duration
-   - All scenes must belong to a beat
-   - **Beat pacing must align with the emotion curve** — High-intensity segments use slow pacing (let the audience fully absorb), valley segments can use fast pacing (create breathing space)
-6. **Structure Design** — Short videos use three-act structure (opening-development-ending); ads use beat-based structure
-7. **Visual Language** — Color tone, lighting, shot style
-8. **Audio Design** — Music, sound effects, voiceover
-9. **Time Breakdown** — Per-scene second allocation (must align with narrative_beats duration allocation)
+1. **Target Feeling** — One sentence: "The viewer should feel ___"
+   Not "tell a story about X" but "create the feeling of X"
 
-### Platform Adaptation
+2. **Reference Anchoring** — Find 2-3 existing videos/images that achieve this feeling.
+   Use `learn_browse` to find them. Study them closely.
+   Write down WHY they work — not what they show, but what you FEEL.
 
-| Platform | Aspect Ratio | Duration Range | Key Requirements |
-|----------|-------------|----------------|------------------|
-| Douyin/TikTok | 9:16 vertical | 15-60s | Must have a hook in the first 3 seconds |
+3. **Technique Extraction** — From the references, identify:
+   - First 3 seconds: What grabs attention?
+   - Pacing: Fast cuts? Slow builds? Where are the pauses?
+   - Color: What is the dominant color mood?
+   - Transitions: Cuts or dissolves? When and why?
+   - Sound: Music tempo, silence placement?
+
+4. **Shot Design** — Now build only the structure you need:
+   - For 5-15s video: 1-3 shots, each one a complete moment
+   - For 15-30s video: 3-5 shots, one clear emotional arc
+   - For 30-60s video: 5-8 shots, with build-up and release
+   - For 1-3 min video: 8-15 shots, with character arcs if applicable
+
+   **Contrast Rule (3+ shots):** Every adjacent pair must differ in at least TWO of: scale (close↔wide), energy (still↔moving), temperature (warm↔cold), density (sparse↔packed), perspective (whose eyes). If you can't name what changes between two shots, merge them.
+
+5. **Visual Description** — Write each shot as a vivid paragraph
+   describing what you SEE and FEEL, specific enough to generate directly.
+
+### The Three Questions (MUST answer before writing any shots)
+
+Before designing a single shot, answer these three questions. If you can't answer them clearly, you're not ready to write.
+
+1. **Hook Mechanism** — Not "what happens first" but what **mechanism** grabs attention in the first 1-3 seconds?
+   - **Mystery**: showing something that raises a question (a result before the cause, a detail that doesn't fit)
+   - **Disruption**: something wrong in the frame (anachronism, contrast, violation of expectations)
+   - **Confrontation**: eye contact, direct address, breaking the fourth wall
+   - **Impact**: a visceral moment — a hit, a fall, a scream — before context
+   - Name the mechanism. "Beautiful woman appears" is not a mechanism.
+
+2. **The Turn** — The ONE moment where the viewer's understanding shifts. Not a plot point — a perceptual shift. What did they think they were watching, and what do they realize they're actually watching?
+   - Example: "We think we're watching a love story → we realize we're watching an assassination"
+   - Example: "We think we're watching futility → we realize the ocean is smaller than it was"
+   - If there is no turn, you have a slideshow, not a story.
+
+3. **The Memory Image** — One specific, concrete image that is NOT "beautiful person + atmospheric lighting." Ask: has AI generated this exact image a thousand times? If yes, find something else.
+   - Bad: "Cherry blossoms falling around a beautiful woman"
+   - Good: "A war-council table with two empty chairs — and a woman's hairpin driven into the wood between them"
+   - The memory image is what the viewer describes when they tell a friend about this video.
+
+### Story Instinct
+
+Every video — even 10 seconds — should answer one question: **"What changed?"**
+
+Something was one way, then it wasn't. That's a story. A mood piece is beautiful; a story is unforgettable. Know which one you're making.
+
+**Duration-scaled story thinking** (intuition, not templates):
+
+- **Under 15s** — One moment of change. A reveal, a reaction, a before/after. One frame changes everything.
+- **15-30s** — A want and what happens to it. Someone desires something; they get it or lose it.
+- **30-60s** — A character, an obstacle, a shift. The viewer watches someone change because of something.
+- **Over 60s** — A full arc. The person at the end is different from the person at the start.
+
+**The narrator question:** "Does this video have a storyteller?" Not literally a voice — but a perspective. Good stories always feel like someone is telling them to you, even in silence. When a voice IS needed, it carries what images can't: inner thoughts, irony, the meaning beneath the surface.
+
+### What NOT to Do
+
+- Don't write 5-8 point emotion_curves for 15-second videos
+- Don't define narrative_beats with 5 stages for a 10-second clip
+- Don't write 400-600 word descriptions when 80 words capture it
+- Don't add structure for structure's sake — add it only when it serves the feeling
+- **Don't write all shots in the same visual register.** If every shot is "beautiful person + atmospheric environment," the script has failed. If all shots look like the same photo with different captions, start over.
+- **Don't open with "figure emerges from mist/fog/darkness."** This is the single most overused AI video opening. Find something specific.
+- **Don't open with the prettiest frame.** Open with the most DISRUPTIVE frame — the one that makes the viewer's thumb stop.
+- **Don't describe what the viewer "should feel."** Design the MECHANISM that creates the feeling. Contrast, timing, surprise, withholding — these create emotion. Adjectives don't.
+
+## Platform Adaptation
+
+| Platform | Aspect Ratio | Duration Range | Key Requirement |
+|----------|-------------|----------------|-----------------|
+| Douyin/TikTok | 9:16 vertical | 15-60s | Hook in first 3 seconds |
 | Bilibili | 16:9 horizontal | Flexible | High content density |
 | Xiaohongshu | 3:4 or 1:1 | 15-60s | Aesthetics first |
-| YouTube | 16:9 horizontal | Flexible | Opening-hook-content-CTA |
+| YouTube | 16:9 horizontal | Flexible | Opening-hook-content |
 | Instagram | 9:16 or 1:1 | 15-90s | Visual impact |
 
-### Short Video Script Structure
+## Script Quality Standards
 
-**Ad Format (15-30s):**
-1. Hook (0-3s) — Grab attention
-2. Pain point/Scenario (3-10s) — Build resonance
-3. Product showcase (10-20s) — The solution
-4. Call to action (20-30s) — CTA
+### The Scroll-Stop Test
 
-**Story Format (30-60s):**
-1. Hook (0-3s) — Set up suspense; open with the most striking visual or most unexpected question
-2. Setup (3-15s) — Establish context quickly without dragging
-3. Conflict/Climax (15-40s) — Core content with tight pacing and high information density
-4. Twist/Ending (40-60s) — Unexpected, leaving a lasting impression
+Before anything else: **"Would I stop scrolling for this?"**
 
-## Script Quality Standards (Strictly Enforced)
+- **Is there a hook in the first 3 seconds?** If not, the viewer has already scrolled away
+- **Does every shot have a reason to exist?** If removing it doesn't matter, remove it
+- **Is there anything unexpected?** If the audience can predict every frame, the script has failed
+- **Is the pacing tight?** A 60s video doesn't need 8s of sunrise. 2-3s establishes mood.
 
-### Reject Mediocrity
+### Narrative Principles (All Genres)
 
-A good script must make people want to keep watching. Self-check the following:
+1. **Jump to the core** — Don't over-build. Start at or near the most engaging moment
+2. **Create contrast** — Big/small, fast/slow, light/dark, problem/solution. Contrast is the most powerful tool
+3. **Concentrate emotion** — 60 seconds = one core feeling. Don't be greedy
+4. **Show first, speak only what images can't** — Images carry the story; voice carries inner thoughts, irony, the unsaid
+5. **Rhythm variation** — Alternate fast and slow, tension and release. Constant pace = sleep
+6. **Breathing** — Dense → sparse → extremely dense → quiet. Like music: rests make the notes hit harder
 
-- **Is there a hook in the first 3 seconds?** — If not, the viewer has already scrolled away
-- **Does every scene have a reason to exist?** — If removing a scene doesn't affect the story, it should be removed
-- **Are there any "wasted scenes"?** — Scenes that purely showcase scenery without advancing the plot are wasted
-- **Is the pacing tight?** — A 60-second video doesn't need an 8-second sunrise; 2-3 seconds is enough to establish mood
-- **Is there anything unexpected?** — A script where the audience can predict what happens next has failed
+### Genre Techniques
 
-### Narrative Structure Requirements (Applies to All Script Types)
+**Story/Myth:** For well-known stories, the audience already knows WHAT happened. Telling them what happened is worthless — they'll scroll past. Your job is to show what it FELT LIKE from an angle they've never considered. Find the person in the story who has never been the protagonist. Find the 3 seconds nobody has depicted. Find the sensory detail everyone forgot. Jump to the moment of change, not the beginning. A single line of inner monologue at the turning point can be more powerful than a minute of beautiful chronology.
+**Ad/Product:** First 3s = pain point or stunning effect. Before/after comparison. Concise CTA. Voice = authority or relatability.
+**Tutorial:** Show result first. One visual per step. Narrator guides — clear, warm, no filler.
+**Mood/Vlog:** Open with strongest visual. Build emotion progressively. Voiceover (if any) is personal and intimate, like a diary entry.
 
-**All types of short videos** are most prone to the "chronological account" mistake — a flat progression from start to finish with no climax. Whether it's an ad, story, tutorial, vlog, or brand film, all must achieve the following:
+## Output: shots.yaml
 
-1. **Jump straight to the core** — Don't over-build; cut directly to the most engaging moment. Ads show the pain point or surprise immediately, stories start just before the climax, tutorials show the end result first
-2. **Create suspense** — Show results before revealing the process, ask questions before giving answers, create conflict before resolving it. Make the audience wonder "Why?" or "How did they do that?"
-3. **Concentrate emotion** — 60 seconds is only enough for one core message or one core emotion. Don't be greedy. One ad solves one pain point; one story tells one theme
-4. **Visual-driven** — Tell the story through visuals as much as possible; reduce reliance on voiceover. The visuals themselves should convey information and emotion
-5. **Create contrast and tension** — Contrast is the most powerful narrative tool: big vs. small, fast vs. slow, light vs. dark, old vs. new, problem vs. solution
-6. **Rhythm variation** — Alternate between fast and slow, tension and relief. A video at one constant speed is a lullaby
-7. **Information density waves** — Information density must breathe: dense → sparse → extremely dense → quiet. It's not "every second must have information" but "meaningful silence and meaningful density alternating." 1-2 seconds of silence before the climax = the most powerful "information." Analogy: rests and accents in music
-8. **Emotion before visuals** — First ask "What should the audience feel right now?" then ask "What is the visual?" If you're thinking "draw a cherry blossom tree" without first asking "What should the audience feel?" the order is reversed
+The output is a single `shots.yaml` file (see template.md for full schema):
 
-### Genre-Specific Narrative Techniques
+```yaml
+feeling: "One sentence — what should watching this FEEL like"
+style_anchor: >
+  50-100 word visual style description covering render style, color palette,
+  lighting, texture quality, and exclusions (NOT cartoon, NOT anime, etc.)
 
-**Story/Myth:**
-- Jump straight to the climax; don't start with "Once upon a time"
-- Flashback: Show the result first, then reveal the cause
-- Visuals replace voiceover; tell the story through imagery
+characters:
+  - id: character_name
+    visual: >
+      50-100 word character appearance: age, build, skin, hair, clothing,
+      signature features. Specific enough to generate consistently.
+    inner_desire: "what drives them internally"
+    voice: "low, weathered, speaks slowly — like someone who's seen too much"  # optional — guides voice tone in video_prompt
 
-**Ad/Product:**
-- The first 3 seconds directly address the pain point or show a stunning effect
-- Comparison method: before vs. after, competitor vs. product
-- CTA should be concise and powerful — no rambling
+references:
+  - image: "assets/design/character_name.png"
+  - image: "assets/learn/ref_01.png"
+    why: "this color palette is exactly right"
 
-**Tutorial/Educational:**
-- Show the final result first (let the audience see the value)
-- Steps should be streamlined — one visual per step
-- Highlight key information visually; don't rely solely on voiceover
-
-**Vlog/Mood:**
-- Open with the most impactful visual
-- Build emotion progressively rather than laying it flat
-- The ending should linger; don't cut off abruptly
-
-### Example — Jingwei Fills the Sea (Wrong vs. Correct Approach)
-
-❌ Wrong: Sunrise → Girl goes to sea → Storm → Drowning → Transforms into bird → Fills the sea → Sunset (chronological account, 8 scenes, 8 seconds each evenly distributed)
-
-✓ Correct:
-- Opening (3s): A small bird carrying a pebble flies across the ocean — Who is this? Why?
-- Flashback (8s): Happy images of the girl running and playing on the shore, then suddenly waves engulf everything (quick cuts)
-- Core (20s): After transforming into a bird, a loop of picking up stones-flying-dropping stones, pace accelerating from slow to fast, from one pebble to countless pebbles
-- Climax (5s): In a storm, Jingwei still flies, feathers soaked, silhouette against lightning
-- Ending (4s): After the storm, a distant shot of Jingwei continuing to fly in morning light — perseverance has no end
-
-### Scene Duration Allocation Principles
-
-- **Short videos are not films** — In a 60-second video, no single scene should exceed 10 seconds
-- **Establishing mood only takes 2-3 seconds** — One stunning shot is enough; no need for an 8-second slow push
-- **Action scenes can be shorter** — 1-2 second quick cuts have more impact
-- **Every second must carry information** — If nothing happens in a given second, it's wasted
-- **AI-generated video can be trimmed to the best 1-2 seconds** — No need to use the full 5-second clip
-
-## Output Requirements
-
-The generated screenplay.yaml must include (see template.md for the full schema):
-- **emotion_curve** — The emotional blueprint for the entire video; must be defined before everything else
-- **memory_points** — At least 2 unforgettable moments for the audience
-- **characters** — Each character's inner desire, conflict, arc, and signature detail
-- **narrative_beats** — Must be defined before scenes; includes key beats like hook/climax
-- Each scene's precise time segment, **beat_ref**, and **emotional_function**
-- **memory_point_ref** for scenes containing memory anchors
-- Detailed visual descriptions (not abstract — specific enough to be drawn)
-- Camera movement direction
-- Audio cues
-- Transition methods between scenes
-
-## Writing Principles
-
-- **Visual writing** — Every description must conjure an image in the mind
-- **Specific beats abstract** — "Golden sunlight filtering through white curtains onto a wooden table" not "cozy atmosphere"
-- **One focus per scene** — Don't cram too much information into one shot
-- **Consider AI generation limitations** — Avoid complex multi-person interactions, precise text, hand close-ups
-- **Period accuracy** — All props, scenes, and costumes must match the story's historical setting
-- **Scene continuity** — Adjacent scenes need logical transitions; no abrupt jumps
-- **Tight is better** — Better short and focused than long and empty
-- **Self-check each scene** — "Does this scene advance the story? What happens if I remove it?"
-
-## Visual Treatment — Embedded in the Script
-
-**Visual treatment = "painting" a picture with words.** Each scene's `visual_description` field must be a novel-level, exhaustively detailed visual prose passage.
-
-### Writing Style
-
-**Write visuals like writing a novel — continuous, flowing prose, not fragmented short phrases.**
-
-❌ Wrong example (fragmented, like filling out a form):
-```
-Character: Boy standing by the sea
-Environment: Dusk, waves
-Lighting: Sunset, warm tones
-Action: Takes off shoes, looks at the sea
+shots:
+  - id: SHOT_001
+    feeling: "what this shot should make the viewer feel"
+    duration: 3
+    prompt: >
+      Detailed image generation prompt. Must include style_anchor.
+      Use photographer language: lens (85mm), aperture (f/1.8),
+      lighting direction (golden hour from screen-left), specific
+      colors (cobalt blue, amber gold). Describe what you SEE.
+    video_prompt: >
+      Motion description. Opening state → closing state.
+      Camera movement. Character action.
+      [If narration exists, weave it in:]
+      The old man whispers in a weathered, deep voice "孩子，别怕",
+      footsteps on wet sand, distant waves, melancholic piano underscore.
+    reference_images: ["character_name"]
+    transition_out: cut
+    audio:                    # optional — structured creative intent for this shot's sound
+      narration:              # dialogue or voiceover (woven into video_prompt for generation)
+        speaker: "narrator"   # or a character id
+        text: "The actual spoken words"
+        tone: "low, calm, nostalgic"
+      music: "melancholic piano, building slowly"
+      sfx: "waves, wind, footsteps on sand"
 ```
 
-✅ Correct example: Use continuous prose to describe the scene from start to finish in vivid detail, so that closing your eyes after reading lets you "see" the image. All details (character, environment, lighting, color, motion) weave into the narrative seamlessly.
+### Shot Writing Principles
 
-### Dimensions to Cover (Naturally Woven into Prose — Don't List as Bullet Points)
+- **Every shot needs a `feeling`** — This is the creative anchor. Write it first.
+- **Prompts must be vivid and specific** — Not "beautiful woman in city" but "Chinese woman, 22, porcelain skin, wearing a cream silk blouse, standing at the intersection of neon-lit Shibuya crossing, shallow depth of field, rain droplets catching pink and blue neon bokeh, shot from slightly below on 85mm f/1.4, Kodak Portra 400 film grain"
+- **Include style_anchor in every prompt** — Copy the full style_anchor into each shot's prompt
+- **Colors are specific** — "cobalt blue / ochre brown / slate gray" not "blue / brown"
+- **Physical anchoring** — "She lifts the shell to her right ear" not "The shell is held to the ear"
+- **Period accuracy** — All props, costumes, architecture match the story's era
+- **Opening/closing states** — For video_prompt, describe what the frame looks like at the start and end, so adjacent shots can connect
+- **Narration is a creative choice, not a default** — Silence is powerful. Add voice only when it deepens the story: inner monologue at a turning point, a narrator bridging time, a character's words that change everything. If images already say it, voice is redundant.
+- **Audio in video_prompt** — Seedance 1.5 generates audio with the video. Dialogue goes in quotes directly in video_prompt: `The girl says "我终于找到了"`. Describe tone near the speaker: `in a trembling, hopeful voice`. Sound effects and music are comma-separated descriptions at the end of video_prompt.
+- **Voice consistency** — Define each character's `voice` once in the characters section. Use that description consistently in every video_prompt where the character speaks.
 
-1. **Full character appearance** — Physical features, skin tone, hairstyle and hair color, clothing material/color/wear/detail embellishments, posture, expression, movement, body orientation
-2. **Objects and props** — Material, color, size, condition (new/worn), spatial relationship to characters
-3. **Spatial layout** — Foreground/midground/background, composition (rule of thirds/center/diagonal)
-4. **Environmental details** — Ground material, vegetation, architectural style, sky conditions, visual cues of temperature and humidity
-5. **Color** — Use specific color names for dominant hues (not "warm tones" but "amber gold/ochre brown/indigo blue")
-6. **Lighting** — Light source direction (from screen left/right/above/backlit), light type (direct/diffused/scattered), color temperature, shadow shapes, highlight positions
-7. **Camera** — Suggested framing and angle, camera movement direction and speed (naturally woven into narration)
-8. **Time flow** — What changes occur from the first second to the last second of the scene
+### Duration Guidelines
 
-### Writing Principles
+- **Hook shots**: 1-3 seconds (shorter = better)
+- **Action**: 1-2 second quick cuts have more impact
+- **Establishing mood**: 2-3 seconds is enough
+- **Climax**: Can be 4-6 seconds — let it breathe
+- **No single shot > 8 seconds** in a short video
+- **AI-generated 5s clips often only yield 1-2s of usable footage** — account for trimming
 
-- **Like writing a novel** — Continuous prose in large paragraphs, not fragmented phrases or form-filling descriptions
-- **Specific enough to be drawn** — "Golden sunset at 45 degrees from screen left, creating a half-light half-shadow Rembrandt lighting on the face" not "the lighting is beautiful"
-- **Colors must be specific** — "Cobalt blue / ochre brown / slate gray / pale yellow / rust red" not "blue / brown"
-- **Positions must be precise** — "At the right third line" / "Lower left foreground" / "Center-upper background"
-- **Dynamic, not static** — Describe motion trajectories and change processes; the scene is alive
-- **Emotion throughout** — Every visual choice serves the emotion
-- **Lock character appearance** — The same character's appearance/costume must be consistent across all scenes, referencing the visual_definition in characters
-- **Physical anchoring** — When describing objects, specify who is holding/touching/operating them. ❌ "The shell is held to the ear" → ✅ "He lifts the shell to his right ear with his left hand"
-- **Smooth continuity** — Adjacent scenes' closing_state and opening_state must transition naturally
+### For Longer Videos (1-3 min)
 
-### Word Count Guide
+When the video is longer, you may add more structure:
+- Characters with `inner_desire` and `arc` (internal transformation)
+- A clear emotional arc across the sequence
+- Build-up before the climax (quiet → explosion)
+- But keep it minimal — structure serves feeling, not the other way around
 
-| Scene Type | Suggested Word Count | Notes |
-|-----------|---------------------|-------|
-| Regular scene | 200-400 words | Continuous prose fully covering all dimensions |
-| Key turning point | 300-500 words | Every stage of emotional change must be described |
-| Memory anchor | 400-600 words | Cinematic-level description; every pixel accounted for |
-| Transition scene | 150-250 words | Focus on visual continuity with preceding and following scenes |
+## Period Consistency
 
-### Workflow
+For historical/mythological content, check each shot:
 
-1. **Establish character visual profiles** — Write a 50-100 word `visual_definition` for each character in characters (hairstyle/hair color, skin tone, body type, signature features); reuse across all subsequent scenes
-2. **Define the global visual tone** — Describe the overall color/lighting/texture style in `visual_tone`
-3. **Write visual prose scene by scene**:
-   - First feel the scene's emotion — "What should the audience feel right now?"
-   - Then close your eyes and "see" the scene, writing it from far to near, from whole to detail
-   - visual_description uses YAML `>` folded scalar (not `|`) to avoid unwanted line breaks in output
-4. **Re-read → Reflect**:
-   - After reading each description, can you "see" the scene?
-   - Is the character's appearance consistent across scenes?
-   - Can adjacent scenes' endings and beginnings connect naturally?
-   - Are there any anachronistic elements?
-   - Does the color/lighting tone match the emotion_curve?
-5. **No single pass allowed** — Must go through at least one round of reflective iteration
-
-## Period Consistency Check
-
-After writing the script, review each scene for:
-
-1. **Props** — Does this item exist in the story's era? (e.g., no iron tools in the ancient era; no paper before the Warring States period)
-2. **Architecture** — What building forms exist in the story's era? (e.g., thatched huts, cave dwellings, simple stone houses in primordial times)
-3. **Costumes** — What do people wear in the story's era? (e.g., animal skins, leaves, rough hemp cloth in primordial times)
-4. **Transportation** — What vehicles exist in the story's era? (e.g., no sailboats in primordial times — only dugout canoes or bamboo rafts)
-5. **Flora and geography** — What plants and landforms exist in the story's region and era?
-
-### Common Anachronism Examples
-
-| Story Setting | Incorrect Element | Correct Replacement |
-|--------------|-------------------|-------------------|
-| Ancient mythology | Modern wooden ships/sailboats | Dugout canoes, bamboo rafts |
-| Ancient mythology | Fine silk garments | Animal skins, rough hemp, woven leaves |
-| Ancient mythology | Palace architecture | Thatched huts, stone caves, mud-brick houses |
-| Pre-Qin period | Paper books | Bamboo slips, oracle bones |
-| Ancient China | Glass vessels | Pottery, bronze vessels |
+| Element | Question |
+|---------|----------|
+| Props | Does this exist in the era? (No iron in stone age, no paper before Warring States) |
+| Architecture | What buildings exist? (Thatched huts, not palaces, for primordial times) |
+| Clothing | What do people wear? (Animal skins, not silk, for ancient myths) |
+| Transport | What vehicles exist? (Dugout canoes, not sailboats, for ancient times) |
+| Flora | What plants grow in this region/era? |

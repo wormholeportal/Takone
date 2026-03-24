@@ -41,59 +41,61 @@ def _parse_likes(likes_str: str) -> float:
 # ── VLM analysis prompt ──────────────────────────────────────────────
 
 VLM_ANALYZE_PROMPT = """\
-You are a short-video content planning expert. Carefully observe this platform search results page screenshot and analyze the following:
+You are analyzing trending video content to extract the FEELING that makes people stop scrolling.
 
-1. **Cover Visual Style**: Mainstream cover composition methods, color tone tendencies, use of text overlays, people vs. scene ratio
-2. **Thumbnail Commonalities**: What common features do high-liked video covers share? (e.g., large title text, emotional expressions, contrasting colors, etc.)
-3. **Content Type Distribution**: What types are present (drama, tutorial, vlog, special effects showcase, comedy, etc.), and which is most common?
-4. **Attraction Elements**: Which visual elements are most likely to attract user clicks?
+Look at this search results page screenshot and analyze:
 
-Please answer concisely, 2-3 sentences per point."""
+1. **Dominant Feeling**: What emotional tone do the most popular videos convey? (e.g., awe, intimacy, tension, mystery, joy). What feeling makes viewers stop?
+2. **Visual Technique**: What specific visual techniques create that feeling? (color palettes, lighting style, composition patterns, contrast levels, motion style)
+3. **Hook Pattern**: How do the first frames grab attention? (surprising visual, emotional face, dramatic contrast, mystery element)
+4. **Pacing & Rhythm Clues**: From thumbnails and visible content, what pacing patterns seem dominant? (fast cuts, slow reveals, build-and-release)
+
+Focus on WHY these work emotionally, not just WHAT they show. 2-3 sentences per point."""
 
 # ── LLM report generation prompt ─────────────────────────────────────
 
 REPORT_PROMPT_TEMPLATE = """\
-You are a senior short-video content planning expert. Based on the following search result data and visual analysis, generate a detailed viral video research report.
+You are a creative director analyzing trending video content to extract the FEELING and TECHNIQUES that make content go viral.
 
-## Search Keywords: {query}
+## Search: {query}
 ## Platform: {platform}
-## Scraping Time: {timestamp}
+## Time: {timestamp}
 
-## Scraped Video Data (total {count} entries, sorted by popularity):
+## Video Data ({count} entries, sorted by popularity):
 {video_data}
 
-## VLM Visual Analysis:
+## Visual Analysis:
 {vlm_analysis}
 
 ---
 
-Please generate a research report with the following structure (in Markdown format):
+Generate a FEELING PROFILE report (Markdown format). Focus on emotional impact and technique, not content planning metrics:
 
-# Viral Video Overview
-- List the Top 5 most popular videos (title, likes, author)
-- Summarize the overall popularity distribution
+# Feeling Profile
+- What dominant FEELING do the top videos create? (one sentence)
+- What secondary feelings support the main one?
+- How does the feeling evolve across the video? (e.g., mystery → revelation → awe)
 
-# Content Trends
-- Analyze topic distribution (which types are most popular)
-- Trending hashtags and keywords
-- Content duration trends
+# Visual DNA
+- **Color mood**: Dominant palette of successful content (specific: "muted teal + warm amber" not "warm tones")
+- **Lighting style**: What lighting creates the feeling? (soft diffused? harsh contrast? golden hour?)
+- **Composition patterns**: How are frames composed? (centered subject? rule of thirds? extreme close-ups?)
+- **Texture & quality**: Film grain? Clean digital? Vintage filter?
 
-# Visual Style
-- Based on VLM analysis, summarize cover design patterns
-- Color tone and composition trends
-- Visual commonalities of high-liked videos
+# Hook Techniques (First 3 Seconds)
+- How do the top 3 videos grab attention in the first frame?
+- What specific technique makes viewers stop scrolling?
 
-# Copywriting Techniques
-- Title patterns and conventions (emotional words, suspense, numbers, etc.)
-- Differences between high-liked titles vs. low-liked titles
-- Reusable title templates
+# Pacing & Rhythm
+- Fast cuts or slow builds? Where are the pauses?
+- How does energy flow across the video?
 
-# Creative Suggestions
-- Provide 5 specific, actionable creative inspirations
-- Each suggestion should include: topic direction + visual style + title approach
-- Based on data analysis, predict what type of content might go viral
+# Actionable Takeaways
+- 3 specific techniques to steal for our project
+- Each: what technique + why it works emotionally + how to apply it
+- Anti-patterns: what to avoid (common mistakes in this category)
 
-Please ensure the report is concise and practical, emphasizing actionable creative suggestions."""
+Keep it concise and actionable. Every insight should be something we can directly apply to creation."""
 
 
 class VideoResearcher:
@@ -346,7 +348,7 @@ class VideoResearcher:
             model=model,
             max_tokens=8000,
             messages=[
-                {"role": "system", "content": "You are a senior short-video content planning expert skilled at analyzing viral video patterns and providing creative suggestions."},
+                {"role": "system", "content": "You are a creative director who extracts the emotional DNA from trending videos — what feelings they create, what techniques drive those feelings, and how to apply them to new creations."},
                 {"role": "user", "content": prompt},
             ],
         )
@@ -360,7 +362,7 @@ class VideoResearcher:
         response = client.messages.create(
             model=model,
             max_tokens=8000,
-            system="You are a senior short-video content planning expert skilled at analyzing viral video patterns and providing creative suggestions.",
+            system="You are a creative director who extracts the emotional DNA from trending videos — what feelings they create, what techniques drive those feelings, and how to apply them to new creations.",
             messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text

@@ -45,9 +45,9 @@ Roger Deakins inspired cinematography, NOT cartoon, NOT 3D render, NOT anime
 
 ### Style Generation Workflow
 
-1. **Analyze the Project** — Read screenplay.yaml, understand the genre, era, mood, and target audience
-2. **Generate style_anchor** — Synthesize the above dimensions to produce a 50-100 word detailed English style description
-3. **Write to prompts.json** — Save the style_anchor to the `style_anchor` field in prompts.json
+1. **Study References First** — Look at your feeling.yaml references and downloaded images in assets/learn/. Use `analyze_media` on them to extract visual vocabulary (color palette, lighting style, texture quality).
+2. **Derive style_anchor from references** — Don't invent from scratch. Base your style_anchor on what you actually SEE in the reference images. If the references have muted teal tones with film grain, say that specifically.
+3. **Write to shots.yaml / prompts.json** — Save the style_anchor
 4. **Apply Globally** — All subsequent character references, scene references, and every shot's prompt must include the style_anchor
 
 ### Style Consistency Rules
@@ -69,52 +69,78 @@ Roger Deakins inspired cinematography, NOT cartoon, NOT 3D render, NOT anime
 
 ## Character Reference Design
 
+### Aspect Ratio Selection (Critical!)
+
+The aspect ratio MUST match the number of sub-views to avoid figure distortion. Wrong ratios cause compressed/stretched human proportions:
+
+| Views | Recommended Ratio | Reason |
+|-------|------------------|--------|
+| 2 views (front + back) | `3:4` | Two standing figures need moderate width |
+| 3 views (front + 3/4 + side) | `3:2` | Three standing figures need wide canvas but enough height |
+| 4-5 views (turnaround) | `16:9` | Many figures need maximum width |
+| Single character portrait | `3:4` or `2:3` | Vertical orientation for standing pose |
+
+**Never use 16:9 for 2-3 views** — it forces the model to stretch figures horizontally or shrink them vertically, resulting in distorted proportions.
+
+### Human Character Prompt Requirements
+
+For human/humanoid characters, the prompt MUST be detailed (100+ words) and include:
+
+1. **Anatomy keywords** — `correct human anatomy, natural body proportions, proper head-to-body ratio (1:7.5), anatomically correct limbs`
+2. **Detailed physical description** — height/build, face shape, skin tone, eye color, hair style/color/length, expression
+3. **Clothing details** — specific garments, materials, colors, fit, accessories
+4. **Full style_anchor** — copied verbatim from prompts.json
+5. **View specification** — exact views requested
+6. **Quality keywords** — `high quality, high resolution, detailed, sharp focus`
+7. **Technical keywords** — `white background, full body, consistent design, same outfit, same hairstyle, same face across all views`
+8. **Exclusions** — `NOT distorted, NOT chibi, NOT deformed proportions` + style_anchor exclusions
+
 ### Three-View Sheet (Recommended)
 
-Suitable for most characters. Prompt format:
+Suitable for most characters. Use `aspect_ratio: "3:2"`.
 
+**Correct example (human character, detailed prompt):**
 ```
-{character base description}, {full style_anchor}, character reference sheet, three views,
-front view, three-quarter view, back view, white background, full body,
-consistent design, same outfit, same hairstyle
-```
-
-### Style Matching Examples
-
-**Correct (full style_anchor + specific character description):**
-```
-Mythical crimson bird, brilliant red plumage with gold highlights, sharp fierce eyes,
-small graceful body, natural proportions, detailed feather texture,
-cinematic photorealistic, film grain, golden hour lighting, warm amber tones,
-NOT cartoon, NOT cute, NOT round body,
-character reference sheet, three views, front view, side view, back view,
-white background
+A young Asian woman, early 20s, slender build, correct human anatomy, natural body proportions,
+proper head-to-body ratio, 165cm tall, oval face, fair skin, long straight black hair
+reaching mid-back, gentle smile, dark brown eyes, wearing a fitted black crop top and
+high-waisted white leggings, white sneakers, minimalist style,
+{full style_anchor here},
+character reference sheet, three views, front view, three-quarter view, side view,
+white background, full body, high quality, high resolution, detailed, sharp focus,
+consistent design, same outfit, same hairstyle, same face across all views,
+NOT distorted, NOT chibi, NOT deformed proportions
 ```
 
-**Incorrect (missing style_anchor, description too simple):**
+**Incorrect examples:**
 ```
-❌ cute red bird, round body, big eyes, cartoon style
-❌ red bird, character sheet (too simple, no style information included)
+❌ girl in black top and white pants, character sheet (too vague, no anatomy keywords, no proportions)
+❌ beautiful woman, three views, white background (missing details, will cause inconsistency)
 ```
 
 ### Five-View Sheet (Complex Characters)
 
-Suitable for characters with rich visual details:
+Suitable for characters with rich visual details. Use `aspect_ratio: "16:9"`.
 
 ```
-{character base description}, {full style_anchor}, character reference sheet, five views,
-front, left side, right side, back, three-quarter, turnaround,
-white background, full body
+{detailed character description with anatomy keywords}, {full style_anchor},
+character reference sheet, five views, front, left side, right side, back, three-quarter,
+turnaround, white background, full body, high quality, high resolution,
+consistent design, same face, same outfit, same hairstyle,
+NOT distorted, NOT deformed proportions
 ```
 
 ### Character Reference Key Points
 
-- **aspect_ratio**: Recommended `1:1` or `16:9` (more space for views)
+- **aspect_ratio**: MUST match view count — `3:2` for 3 views, `16:9` for 4-5 views, `3:4` for 2 views
+- **Human proportions**: Always include anatomy/proportion keywords to prevent distortion
+- **Prompt length**: Must be 100+ words for human characters — short prompts produce low-quality results
 - **White background**: Makes it easier for the model to extract character features
 - **Full body**: Ensures complete clothing details
 - **consistent design**: Key phrase for ensuring multi-view consistency
 - **Must include style_anchor** — Every character prompt must fully reference the style_anchor from prompts.json
 - **Consistent exclusions** — NOT keywords from the style_anchor must also appear in character prompts
+- **Quality keywords**: Always include `high quality, high resolution, detailed, sharp focus`
 
 ## Scene Reference Design
 
@@ -133,8 +159,8 @@ Generate reference images for key scenes from specific angles:
 
 ## Naming Convention
 
-- Characters: `assets/references/{character_id}.png` (e.g., `merchant.png`, `fox_woman.png`)
-- Scenes: `assets/references/{scene_id}.png` (e.g., `bamboo_forest.png`, `moonlit_clearing.png`)
+- Characters: `assets/design/{character_id}.png` (e.g., `merchant.png`, `fox_woman.png`)
+- Scenes: `assets/design/{scene_id}.png` (e.g., `bamboo_forest.png`, `moonlit_clearing.png`)
 
 ## References in prompts.json
 
@@ -152,13 +178,17 @@ Add a `reference_images` array to each shot's `image_prompt`, listing the refere
 }
 ```
 
-The `generate_image` tool will automatically look for corresponding `.png` files under `assets/references/`,
-using `image_to_image` mode to generate, ensuring characters and scenes match the reference images.
+The `generate_image` tool searches for reference images in this order:
+1. `assets/design/{id}.png/.jpg/.jpeg/.webp`
+2. `assets/learn/{id}.png/.jpg/.jpeg/.webp`
+
+This means images downloaded via `learn_download` can be used directly as references without copying.
+You can also use relative paths: `"reference_images": ["merchant", "learn/style_sample.png"]`
 
 ## Workflow
 
-1. **Analyze the project and generate style_anchor** — Read screenplay.yaml, synthesize genre/era/mood/audience, generate a 50-100 word detailed English style description, and write it to the `style_anchor` field in prompts.json
-2. **Analyze characters and scenes** — Read storyboard.yaml, identify all characters and key scenes that appear
+1. **Study references and generate style_anchor** — Read feeling.yaml and analyze reference images. Derive a 50-100 word style_anchor from what you actually see in the references, covering render style, color, lighting, texture, and exclusions. Write to shots.yaml / prompts.json.
+2. **Analyze characters and scenes** — Read shots.yaml, identify all characters and key scenes that appear
 3. **Generate character references** — For each character, call `generate_reference(ref_type="character", ref_id="xxx", prompt="...")`
    - The prompt must include the complete style_anchor
    - The prompt must be specific enough: include body type, proportions, clothing materials, colors, expressions, and other details

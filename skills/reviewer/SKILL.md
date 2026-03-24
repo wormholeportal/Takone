@@ -1,206 +1,126 @@
 ---
 name: reviewer
-description: Multi-stage review — pre-generation script/logic review and post-generation visual quality review.
+description: Taste-driven review — scroll-stop test for creative quality, visual QA for technical quality.
 ---
 
 # Reviewer
 
-Review skill — includes pre-generation script/logic review and post-generation visual quality review.
+Review with your gut, not a checklist. The core question is always: **"Would this make someone stop scrolling?"**
 
-## Review Modes
+## I. The Scroll-Stop Test (Pre-Generation & Post-Generation)
 
-Reviewer has two modes. **Pre-generation review** is the most critical, as it costs far less than reworking after generation.
+Apply this at every stage — after writing shots.yaml, after generating each shot, after assembly.
 
----
+### Core Questions (Answer Honestly)
 
-## I. Pre-Generation Review
+1. **Scroll-stop power** — If this appeared in a Douyin feed, would you stop scrolling? Be brutally honest. If the answer is "maybe" or "it's okay," that's a NO.
 
-**Before generating any images/videos, all of the following review dimensions must be passed.**
+2. **Memory residue** — After watching, what image stays in your mind? If the answer is "nothing specific," the work fails. Every short video needs at least one unforgettable frame.
 
-### P1. Period & Logic Consistency (Highest Priority)
+3. **Reference gap** — Compare against your feeling.yaml references. What's the gap between your work and those references? Be specific about what's different.
 
-Review all elements scene by scene to ensure they match the story's historical period and world-building:
+4. **Wow moment** — Is there at least one moment that makes you go "wow"? If every shot is "fine but not special," the whole piece is mediocre.
 
-- **Anachronisms** — Do ancient/historical stories contain modern elements?
-  - Transportation: Modern ships, cars, airplanes → Should be replaced with rafts, dugout canoes, horse-drawn carts
-  - Daily items: Plastic products, glass bottles, paper (paper did not exist before the Warring States period)
-  - Architecture: Reinforced concrete, glass curtain walls → Should be replaced with thatched huts, adobe, stone buildings
-  - Clothing: Modern garments, zippers, buttons → Should be replaced with animal skins, rough cloth, ties/bindings
-  - Tools: Metal implements (did they exist in the corresponding era?)
-- **Prop plausibility** — Do all objects that appear fit the world-building?
-- **Natural environment** — Are vegetation, terrain, and weather plausible?
-- **Cultural consistency** — Do language, symbols, and rituals match the setting?
+5. **First 3 seconds** — Would the opening grab a distracted person scrolling at high speed? If the hook is weak, nothing else matters.
 
-### P2. Story Logic Consistency
+### How to Use
 
-- **Character continuity** — Is the character's identity and features consistent across all scenes?
-- **Plot coherence** — Is the cause-and-effect chain from Scene A → B → C smooth? Any jumps or contradictions?
-- **Spatial logic** — Is the character's spatial transition from Scene A to Scene B reasonable?
-- **Theme relevance** — Does every shot serve the core theme? Is there any off-topic content?
-- **Emotional arc** — Is the overall emotional progression smooth? Any jarring emotional jumps?
+- **Before generation**: Read your shots.yaml. Close your eyes and imagine the finished video. Does it excite you? If not, rewrite.
+- **After each shot**: Look at the generated image/video. Gut reaction in the first second — do you feel something? If not, regenerate.
+- **After assembly**: Watch the final video. Does it flow? Does it build? Does it land? Compare to your references.
 
-### P3. Shot Continuity Review
+### When It Fails
 
-- **beat_ref completeness** — Does every shot have a beat_ref corresponding to screenplay's narrative_beats? A shot without beat_ref = wasted shot
-- **Start/end states** — Does each shot's opening_state connect with the previous shot's closing_state?
-- **Motion direction** — Is the motion direction consistent between adjacent shots (left/right)?
-- **Lighting transitions** — Do adjacent shots transition naturally in lighting and color temperature?
-- **Transition appropriateness** — Is the chosen transition method suitable for the content? Does each shot have transition_out and cut_on?
-- **Rhythm feel** — Does the shot duration allocation have fast/slow rhythmic variation? pacing_intent cannot all be medium
-
-### P4. Art Style & style_anchor Review
-
-- **style_anchor quality** — Is the style_anchor sufficiently detailed (50-100 words)? Does it cover dimensions like render style, color, lighting, texture, and exclusions? "cinematic, high quality" is too vague and unacceptable
-- **Global consistency** — Does the style_anchor appear in all shot prompts? Any omissions?
-- **Character style matching** — Does the character reference art style match the style_anchor? Is there a disconnect with cartoon characters but photorealistic scenes?
-- **Exclusion enforcement** — Are the NOT keywords in the style_anchor enforced across all prompts?
-
-### P5. Prompt Quality Review
-
-- **Specificity** — Is the prompt specific enough to directly generate an image? Any vague descriptions?
-- **Period accuracy** — Do all elements described in the prompt (props, costumes, architecture) match the era?
-- **Character consistency** — Are descriptions of the same character consistent across different prompts?
-- **Reference image coverage** — Do recurring characters/scenes have reference_images specified?
-- **Video continuity** — Do video_prompts include opening_state and closing_state?
-
-### P6. Narrative Quality Review
-
-- **Hook** — Is there enough grabbing power in the first 3 seconds? Can it capture the audience?
-- **Pacing** — Is the duration allocation reasonable? Any dragging "wasted scenes"? Is there rhythmic variation?
-- **Narrative structure** — Is there suspense? Any twists or surprises? Is it a flat chronological account or does it have ups and downs?
-- **Emotional arc** — Is the overall emotional progression smooth? Is the core emotion focused?
-- **Information density** — Does every second carry information? Any blank segments where "nothing happens"?
-
-### P7. Creative Impact Review (Highest Level Audit)
-
-**This is not checking "is it correct" but "is it good." A technically perfect but emotionally barren work = failure.**
-
-**Core Questions (each must be answered positively, otherwise needs rework):**
-- **Memory point** — After watching this video, what image will stay in the audience's mind? If the answer is "nothing in particular," it fails
-- **Emotional fluctuation** — Does the emotion_curve have genuine ups and downs? Or is it a "medium-intensity flat line"?
-- **Jaw-dropping moment** — Is there at least one "gasp-inducing" moment?
-- **Build-up and release** — Is there sufficient "quiet" before the climax to amplify impact?
-- **Character arc** — Does the character have an arc? Is there internal change from beginning to end? Or are they just a prop?
-- **Breathing feel** — Is the overall feel "rhythmic breathing" or a "steady-pace treadmill"?
-
-**Creative Surprise Check:**
-- Is there one element the audience completely wouldn't expect? (Twist / unexpected combination / surprising perspective)
-- If all decisions are "the most logical choice," it lacks creativity — good work needs "unexpected yet logical"
-
-**Rhythm Quantitative Check:**
-- Count consecutive shots with the same emotional_intensity. If >= 3 → rhythm problem
-- Count consecutive shots with the same breathing. If >= 3 → breathing problem
-- Count consecutive rhythm_relationship = "continuation". If >= 3 → rhythm death
-- Fast shot immediately followed by fast shot? Check if it's intentional
-
-### Pre-Generation Review Workflow (Multiple Iterations, Not Done in One Pass!)
-
-```
-Round Zero: Creative Impact Audit (P7) — Before all technical audits!
- ├─ Read screenplay.yaml
- ├─ Check if emotion_curve has genuine fluctuation (not flat)
- ├─ Check if memory_points are sufficiently striking ("What will stick in the mind after watching?")
- ├─ Check if characters have psychological arcs (inner_desire + arc)
- ├─ Check if information density has breathing
- ├─ This is the hardest audit to pass — if the concept itself is mediocre, perfect technique can't save it
- ├─ Fail → Return to scriptwriter to redesign emotion curve and memory points
- └─ Only proceed to technical audits after passing
-
-Round One: Script Review (P1 + P2 + P6)
- ├─ Read screenplay.yaml
- ├─ Check period/logic/causality/props (P1)
- ├─ Check story logic consistency (P2)
- ├─ Check narrative quality: hook, pacing, structure, emotional arc (P6)
- ├─ Found issues → Modify screenplay.yaml
- └─ Re-evaluate until passed
-
-Round Two: Storyboard Review (P3 + P7 rhythm section)
- ├─ Read storyboard.yaml
- ├─ Check beat_ref completeness, continuity, transitions, opening_state/closing_state
- ├─ Check if cinematic_intent exists for every shot (emotion-driven or arbitrary choice?)
- ├─ Check emotional_intensity fluctuation (3 consecutive identical values = flat line)
- ├─ Check breathing alternation (is there inhale before climax?)
- ├─ Check rhythm_relationship (3 consecutive continuation = rhythm death)
- ├─ Check all key_elements match the historical period
- ├─ Check pacing and duration allocation
- ├─ Found issues → Modify storyboard.yaml
- └─ Re-evaluate until passed
-
-Round Three: Art Style Review (P4)
- ├─ Read prompts.json
- ├─ Check style_anchor quality (detailed enough? covers required dimensions?)
- ├─ Check if all prompts include the complete style_anchor
- ├─ Check if character reference art style matches
- ├─ Found issues → Modify style_anchor or related prompts in prompts.json
- └─ Re-evaluate until passed
-
-Round Four: Prompt Review (P5)
- ├─ Read prompts.json
- ├─ Check each prompt for quality, period accuracy, consistency
- ├─ Check reference_images coverage
- ├─ Check video_prompt continuity descriptions
- ├─ Found issues → Modify prompts.json
- └─ Re-evaluate until passed
-
-All passed → Ready to begin generation
-```
-
-**Important: Each round may require multiple iterations until that round has no issues. Don't rush to the next stage.**
+If the Scroll-Stop Test fails, don't tweak — rethink:
+- Weak concept → Go back to DISCOVER stage, find better references
+- Weak visuals → Adjust style_anchor, try different prompt approach
+- Weak pacing → Rethink shot structure, cut shots, change durations
+- No wow moment → Add contrast: stillness before motion, silence before sound, dark before light
 
 ---
 
-## II. Post-Generation Review
+## II. Visual Quality Check (Post-Generation)
 
-### 1. Visual Quality
-- **Sharpness** — Is the image blurry or has artifacts?
-- **Color** — Does the color tone match expectations? Any color cast?
-- **Composition** — Is the subject position reasonable?
-- **Lighting** — Is the lighting natural and consistent?
+After the creative quality passes, check technical quality:
 
-### 2. Common AI Generation Issues
+### Common AI Generation Issues
 - **Hand deformation** — Abnormal finger count, distortion
-- **Facial distortion** — Disproportionate facial features
-- **Garbled text** — Unreadable text in the image
-- **Object fusion** — Blurred boundaries between two objects merging together
-- **Unnatural motion** — Sudden acceleration/pauses in video movement
-- **Flickering** — Sudden brightness changes between video frames
+- **Facial distortion** — Disproportionate features
+- **Garbled text** — Unreadable text in image
+- **Object fusion** — Blurred boundaries between objects
+- **Unnatural motion** — Sudden acceleration/pauses in video
+- **Flickering** — Sudden brightness changes between frames
 - **Temporal discontinuity** — Object position jumps between frames
-- **Anachronisms** — Elements appearing that don't match the historical period (the most serious issue)
+- **Anachronisms** — Elements that don't match the period (most serious)
 
-### 3. Cross-Shot Consistency
-- **Color tone consistency** — Are all shots within the same color temperature range?
-- **Style consistency** — Is the visual style unified (no mixing photorealistic and cartoon)?
-- **Object consistency** — Is the same product/character consistent across different shots?
-- **Spatial logic** — Do scene transitions follow spatial logic?
-- **Smooth continuity** — Are adjacent shots' start/end visuals connected?
+### Cross-Shot Consistency
+- Color tone consistency across shots
+- Style consistency (no mixing photorealistic + cartoon)
+- Character/object consistency across shots
+- Spatial logic in scene transitions
+- Opening/closing state continuity between adjacent shots
 
-### 4. Narrative Rhythm
-- **Duration appropriateness** — Does each shot's duration match its content?
-- **Rhythm variation** — Is there alternation between fast and slow?
-- **Information density** — Does each shot convey sufficient information?
+### Fix Strategies
 
-## Review Output Format
+| Issue | Fix |
+|-------|-----|
+| Blurry | Increase resolution or regenerate |
+| Color inconsistency | Unify color keywords in prompts |
+| Hand/face issues | Avoid close-ups of hands, use wider framing |
+| Unnatural motion | Simplify motion description (one motion per shot) |
+| Style inconsistency | Check style_anchor is in ALL prompts |
+| Object inconsistency | Use image-to-image with reference images |
+| Anachronisms | Replace with period-appropriate elements |
+| Jarring continuity | Fix opening/closing state descriptions |
 
-Score each shot (1-10) and provide specific issues and suggestions.
+---
 
-## Improvement Strategies
+## III. Shot Evaluation (During Generation)
 
-| Issue | Fix Strategy |
-|-------|-------------|
-| Blurry image | Increase image_size or regenerate |
-| Inconsistent color tone | Adjust color descriptions in prompt, unify color_grading keywords |
-| Hand/face deformation | Avoid hand close-ups, use wider framing |
-| Unnatural motion | Simplify motion description, describe only one motion per shot |
-| Inconsistent style | Check if style_anchor is consistent across all prompts |
-| Inconsistent objects | Use image_to_image with reference images |
-| Anachronisms | Modify element descriptions in prompt, replace with period-appropriate alternatives |
-| Jarring continuity | Modify opening/closing state descriptions in video_prompt |
+Used by the `evaluate_shot` tool. Three dimensions, gut-first:
+
+### Evaluation Dimensions
+
+| Dimension | Weight | Question |
+|-----------|--------|----------|
+| **Gut Reaction** | 60% | First second: what do you FEEL? Is that the right feeling for this shot? Not "is it pretty" but "does it HIT right?" |
+| **Visual Distinction** | 25% | Does this look like generic AI output you've seen 1000 times? Or does it have something that stands out? |
+| **Sequence Fit** | 15% | Following the previous shots, does this create forward momentum? Does the viewer want to see what's next? |
+
+### Scoring
+
+- **Score ≥ 7/10** → PASS
+- **Score < 7/10** → FAIL
+
+On FAIL, describe what FEELS wrong, not what's technically wrong:
+- "It feels flat — no emotional punch"
+- "It looks like every other AI beauty video"
+- "The energy drops when it should be building"
+
+Then suggest a specific fix targeting the feeling.
+
+### Max 3 Attempts
+
+After 3 regenerations, accept the best version and move on. Note unresolved issues for later.
+
+---
+
+## IV. Variation Selection
+
+When multiple versions exist (from generate_image with variations), use `compare_shots`:
+
+1. Send all variations to vision model
+2. Prompt: "You're scrolling Douyin. Which of these would make you stop? Rank them and explain why."
+3. Select the top-ranked version
+4. If none are compelling, rethink the prompt entirely
+
+---
 
 ## Iteration Workflow
 
-1. Review identifies issues
-2. Locate the problematic shot
-3. Analyze the cause (prompt issue / model limitation / parameter issue / logic issue)
-4. Modify the corresponding prompt or parameters
-5. Regenerate that shot
-6. Review again to confirm
+1. Identify the problem (feeling? technique? quality?)
+2. If feeling → rethink the concept or shot design
+3. If technique → adjust prompt (mood, lighting, color, composition)
+4. If quality → fix technical issues (artifacts, consistency)
+5. Regenerate
+6. Re-evaluate

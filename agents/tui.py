@@ -280,6 +280,7 @@ class SplitTerminal:
         self._status_text = ""   # cached status content
         self._input_text = ""    # cached input buffer
         self._input_prompt = "  "
+        self._use_real_cursor = False  # True during read_input for IME compat
 
     # ── lifecycle ────────────────────────────────────────────
 
@@ -336,12 +337,18 @@ class SplitTerminal:
             self._raw_write(f"\033[{rows};1H" + "\n" * scroll_by)
             self._out_row -= scroll_by
             s = self._out_row
+        # During active input (read_input), show real terminal cursor for IME
+        # compatibility; otherwise use fake cursor char.
+        if self._use_real_cursor:
+            cursor_suffix = "\033[?25h"  # show real cursor at end of text
+        else:
+            cursor_suffix = f"{self.CURSOR_CHAR}"
         self._raw_write(
             f"\033[?25l"
             f"\033[{s};1H\033[K  {self._status_text}"
             f"\033[{s+1};1H\033[K  {self.FOOTER_COLOR}{self._footer_text}\033[0m"
             f"\033[{s+2};1H\033[K  {self.BORDER_COLOR}{'─' * border_w}\033[0m"
-            f"\033[{s+3};1H\033[K{self._input_prompt}{self._input_text}{self.CURSOR_CHAR}"
+            f"\033[{s+3};1H\033[K{self._input_prompt}{self._input_text}{cursor_suffix}"
         )
         self._bottom_drawn = True
 
@@ -361,6 +368,21 @@ class SplitTerminal:
 
     # ── thread-safe bottom-area updates ─────────────────────
 
+    def _cursor_to_input_end(self) -> str:
+        """Return escape sequence that parks the cursor on the input line.
+
+        When the real cursor is visible (_use_real_cursor), re-renders the
+        input line so the terminal cursor ends up *after* the text — needed
+        for correct IME positioning.  Otherwise just jumps to the row.
+        """
+        s = self._out_row
+        if self._use_real_cursor:
+            return (
+                f"\033[{s+3};1H\033[K"
+                f"{self._input_prompt}{self._input_text}\033[?25h"
+            )
+        return f"\033[{s+3};1H"
+
     def update_status(self, text: str):
         """Update status bar.  Draws bottom if not visible.  Thread-safe."""
         if not self._active:
@@ -373,7 +395,7 @@ class SplitTerminal:
                 s = self._out_row
                 self._raw_write(
                     f"\033[{s};1H\033[K  {text}"
-                    f"\033[{s+3};1H"
+                    + self._cursor_to_input_end()
                 )
 
     def clear_status(self):
@@ -386,7 +408,7 @@ class SplitTerminal:
                 s = self._out_row
                 self._raw_write(
                     f"\033[{s};1H\033[K"
-                    f"\033[{s+3};1H"
+                    + self._cursor_to_input_end()
                 )
 
     def update_footer(self, text: str):
@@ -399,7 +421,7 @@ class SplitTerminal:
                 s = self._out_row
                 self._raw_write(
                     f"\033[{s+1};1H\033[K  {self.FOOTER_COLOR}{text}\033[0m"
-                    f"\033[{s+3};1H"
+                    + self._cursor_to_input_end()
                 )
 
     def update_input(self, text: str, prompt: str = None):
@@ -413,9 +435,13 @@ class SplitTerminal:
         with _bottom_lock:
             if self._bottom_drawn:
                 s = self._out_row
+                if self._use_real_cursor:
+                    cursor_suffix = "\033[?25h"
+                else:
+                    cursor_suffix = self.CURSOR_CHAR
                 self._raw_write(
                     f"\033[{s+3};1H\033[K"
-                    f"{prompt}{text}{self.CURSOR_CHAR}"
+                    f"{prompt}{text}{cursor_suffix}"
                 )
 
     def read_input(self, prompt: str = None) -> str:
@@ -423,6 +449,7 @@ class SplitTerminal:
 
         Draws the bottom decoration if not visible, reads keystrokes,
         then erases the decoration on Enter so content can follow.
+        Uses real terminal cursor during input for IME compatibility.
         """
         if not self._active:
             return input().strip()
@@ -430,6 +457,7 @@ class SplitTerminal:
             prompt = self.DEFAULT_PROMPT
         self._input_text = ""
         self._input_prompt = prompt
+        self._use_real_cursor = True  # enable real cursor for IME
         # Ensure bottom is drawn
         with _bottom_lock:
             if not self._bottom_drawn:
@@ -438,6 +466,7 @@ class SplitTerminal:
         try:
             old_settings = termios.tcgetattr(fd)
         except termios.error:
+            self._use_real_cursor = False
             return input().strip()
         buf = ""
         self.update_input("", prompt)
@@ -457,15 +486,19 @@ class SplitTerminal:
                     if value == 0x03:  # Ctrl+C
                         self._input_text = ""
                         self._input_prompt = self.DEFAULT_PROMPT
+                        self._use_real_cursor = False
                         raise KeyboardInterrupt
                     if value == 0x04:  # Ctrl+D
                         self._input_text = ""
                         self._input_prompt = self.DEFAULT_PROMPT
+                        self._use_real_cursor = False
                         raise EOFError
                     if value in (0x0A, 0x0D):  # Enter
                         # Reset cached state so next _draw_bottom shows clean input
                         self._input_text = ""
                         self._input_prompt = self.DEFAULT_PROMPT
+                        self._use_real_cursor = False
+                        self._raw_write("\033[?25l")  # hide cursor again
                         with _bottom_lock:
                             self._erase_bottom()
                         return buf.strip()
@@ -478,6 +511,8 @@ class SplitTerminal:
                     buf += value
                     self.update_input(buf, prompt)
         finally:
+            self._use_real_cursor = False
+            self._raw_write("\033[?25l")  # ensure cursor hidden on exit
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
@@ -585,6 +620,7 @@ class InputWatcher:
             return
         buf = ""
         # Clear any stale input text from previous read_input
+        _split_terminal._use_real_cursor = True  # real cursor for IME compat
         _split_terminal.update_input("")
         try:
             tty.setcbreak(fd)
@@ -620,6 +656,8 @@ class InputWatcher:
         except Exception:
             pass
         finally:
+            _split_terminal._use_real_cursor = False
+            _split_terminal._raw_write("\033[?25l")  # hide cursor
             try:
                 termios.tcsetattr(fd, termios.TCSADRAIN, self._old_settings)
             except Exception:
@@ -721,20 +759,20 @@ def _print_thinking(thinking: str):
 # Each role = (emoji, role_name, color_code)
 
 _AGENT_ROLES = {
-    "scriptwriter":      ("✍️",  "Scriptwriter",     Colors.GREEN),
-    "storyboard":        ("🎬", "Storyboard Artist",   Colors.CYAN),
-    "visualizer":        ("🎨", "Visual Designer", Colors.MAGENTA),
-    "designer":          ("🎨", "Art Director", Colors.MAGENTA),
-    "reviewer":          ("🔍", "Reviewer",     Colors.YELLOW),
-    "pipeline":          ("📋", "Producer",     Colors.ORANGE),
+    "scriptwriter":      ("✍️ ", "Scriptwriter",      Colors.GREEN),
+    "storyboard":        ("🎬", "Storyboard Artist", Colors.CYAN),
+    "visualizer":        ("🎨", "Visual Designer",   Colors.MAGENTA),
+    "designer":          ("🎨", "Art Director",      Colors.MAGENTA),
+    "reviewer":          ("🔍", "Reviewer",          Colors.YELLOW),
+    "pipeline":          ("📋", "Producer",          Colors.ORANGE),
 }
 
 _TOOL_ROLES = {
-    "assemble_video":     ("✂️",  "Editor",   Colors.CYAN),
-    "add_audio_track":    ("🎵", "Sound Engineer",   Colors.GREEN),
-    "generate_image":     ("🖼️", "Generating",   Colors.MAGENTA),
-    "generate_video":     ("🎬", "Generating",   Colors.MAGENTA),
-    "generate_reference": ("🎨", "Art Director", Colors.MAGENTA),
+    "assemble_video":     ("✂️ ", "Editor",         Colors.CYAN),
+    "add_audio_track":    ("🎵", "Sound Engineer", Colors.GREEN),
+    "generate_image":     ("🖼️ ", "Generating",     Colors.MAGENTA),
+    "generate_video":     ("🎬", "Generating",     Colors.MAGENTA),
+    "generate_reference": ("🎨", "Art Director",   Colors.MAGENTA),
 }
 
 _DEFAULT_ROLE = ("🎬", "Director", Colors.LIGHT_BLUE)
@@ -779,6 +817,8 @@ _TOOL_LABELS = {
     "check_continuity": "🔗 Continuity Check",
     "validate_before_generate": "✅ Pre-generation Validation",
     "search_reference": "🔎 Search Reference",
+    "learn_browse": "🌐 Learn Browse",
+    "learn_download": "📥 Learn Download",
     "list_assets": "📂 List Assets",
     "assemble_video": "🎞️  Assemble Video",
     "add_audio_track": "🎵 Add Audio",

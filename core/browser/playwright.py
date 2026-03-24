@@ -11,10 +11,14 @@ user-data-dir, then connects Playwright via CDP.
 import asyncio
 import json
 import os
+import random
 import subprocess
 import sys
+import time as _time
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 class BrowserConnectionError(Exception):
@@ -47,6 +51,71 @@ PLATFORM_SEARCH_URLS = {
     "xiaohongshu": "https://www.xiaohongshu.com/search_result?keyword={query}",
     "youtube": "https://www.youtube.com/results?search_query={query}",
 }
+
+# Web search engine templates
+WEB_SEARCH_URLS = {
+    "baidu": "https://www.baidu.com/s?wd={query}",
+    "google": "https://www.google.com/search?q={query}",
+    "baidu_image": "https://image.baidu.com/search/index?tn=baiduimage&word={query}",
+    "google_image": "https://www.google.com/search?tbm=isch&q={query}",
+    "zhihu": "https://www.zhihu.com/search?type=content&q={query}",
+    "baike": "https://baike.baidu.com/search?word={query}",
+}
+
+# ── User-Agent pool ─────────────────────────────────────────────────────
+
+_UA_POOL = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+]
+
+
+def random_ua() -> str:
+    """Return a random User-Agent string from the pool."""
+    return random.choice(_UA_POOL)
+
+
+# ── Domain rate limiter ─────────────────────────────────────────────────
+
+
+class DomainRateLimiter:
+    """Per-domain rate limiter with exponential backoff on errors."""
+
+    def __init__(self, min_interval: float = 3.0, max_interval: float = 6.0):
+        self._last_request: dict[str, float] = {}
+        self._min = min_interval
+        self._max = max_interval
+        self._backoff: dict[str, int] = defaultdict(int)
+
+    async def wait(self, url: str):
+        """Wait if needed before making a request to this domain."""
+        domain = urlparse(url).netloc
+        now = _time.monotonic()
+        interval = random.uniform(self._min, self._max)
+        backoff = self._backoff.get(domain, 0)
+        if backoff > 0:
+            interval *= min(2 ** backoff, 30)
+        elapsed = now - self._last_request.get(domain, 0)
+        if elapsed < interval:
+            await asyncio.sleep(interval - elapsed)
+        self._last_request[domain] = _time.monotonic()
+
+    def success(self, url: str):
+        """Record a successful request — reset backoff."""
+        self._backoff[urlparse(url).netloc] = 0
+
+    def error(self, url: str):
+        """Record a failed request — increase backoff."""
+        domain = urlparse(url).netloc
+        self._backoff[domain] = self._backoff.get(domain, 0) + 1
+
+
+# Module-level singleton shared across all browser instances
+_rate_limiter = DomainRateLimiter()
+
 
 # ── Paths & constants ────────────────────────────────────────────────────
 
@@ -278,6 +347,170 @@ EXTRACT_JS = {
 """,
 }
 
+# Web search extraction JS (for search_web / search_images)
+WEB_EXTRACT_JS = {
+    "baidu": """
+(function() {
+    var results = [];
+    document.querySelectorAll('.result, .c-container').forEach(function(item) {
+        var titleEl = item.querySelector('h3 a, .t a');
+        if (!titleEl) return;
+        var title = titleEl.innerText.trim();
+        var href = titleEl.getAttribute('href') || '';
+        var snippetEl = item.querySelector('.c-abstract, .content-right_2s-H4, [class*="content"]');
+        var snippet = snippetEl ? snippetEl.innerText.trim().substring(0, 200) : '';
+        if (title && title.length > 2)
+            results.push({title: title.substring(0, 150), url: href, snippet: snippet});
+    });
+    return JSON.stringify(results.slice(0, __MAX__));
+})()
+""",
+    "google": """
+(function() {
+    var results = [];
+    document.querySelectorAll('div.g, div[data-hveid]').forEach(function(item) {
+        var titleEl = item.querySelector('h3');
+        if (!titleEl) return;
+        var title = titleEl.innerText.trim();
+        var linkEl = item.querySelector('a[href^="http"]');
+        var href = linkEl ? linkEl.getAttribute('href') : '';
+        var snippetEl = item.querySelector('[data-sncf], .VwiC3b, [class*="IsZvec"]');
+        var snippet = snippetEl ? snippetEl.innerText.trim().substring(0, 200) : '';
+        if (title)
+            results.push({title: title.substring(0, 150), url: href, snippet: snippet});
+    });
+    return JSON.stringify(results.slice(0, __MAX__));
+})()
+""",
+    "zhihu": """
+(function() {
+    var results = [];
+    document.querySelectorAll('.SearchResult-Card, .Card').forEach(function(item) {
+        var titleEl = item.querySelector('h2, [class*="ContentItem-title"] a');
+        if (!titleEl) return;
+        var title = titleEl.innerText.trim();
+        var linkEl = item.querySelector('a[href*="/question/"], a[href*="/p/"], a[href*="/answer/"]');
+        var href = linkEl ? linkEl.getAttribute('href') : '';
+        if (href && !href.startsWith('http')) href = 'https://www.zhihu.com' + href;
+        var snippetEl = item.querySelector('[class*="RichText"], .CopyrightRichText-richText');
+        var snippet = snippetEl ? snippetEl.innerText.trim().substring(0, 200) : '';
+        if (title && title.length > 3)
+            results.push({title: title.substring(0, 150), url: href, snippet: snippet});
+    });
+    return JSON.stringify(results.slice(0, __MAX__));
+})()
+""",
+    "baike": """
+(function() {
+    var results = [];
+    document.querySelectorAll('.searchResult .resultList dd, .search-list dd, .result-list li').forEach(function(item) {
+        var titleEl = item.querySelector('a[href*="/item/"], a[href*="baike.baidu.com"]');
+        if (!titleEl) return;
+        var title = titleEl.innerText.trim();
+        var href = titleEl.getAttribute('href') || '';
+        if (href && !href.startsWith('http')) href = 'https://baike.baidu.com' + href;
+        var snippetEl = item.querySelector('p, .abstract, [class*="desc"]');
+        var snippet = snippetEl ? snippetEl.innerText.trim().substring(0, 200) : '';
+        if (title && title.length > 1)
+            results.push({title: title.substring(0, 150), url: href, snippet: snippet});
+    });
+    // Fallback: if on a direct baike page, extract summary
+    if (results.length === 0) {
+        var mainTitle = document.querySelector('h1');
+        var summary = document.querySelector('.lemma-summary, [class*="lemmaSummary"], .para[label-module="para"]');
+        if (mainTitle && summary) {
+            results.push({
+                title: mainTitle.innerText.trim(),
+                url: window.location.href,
+                snippet: summary.innerText.trim().substring(0, 500)
+            });
+        }
+    }
+    return JSON.stringify(results.slice(0, __MAX__));
+})()
+""",
+    "baidu_image": """
+(function() {
+    var results = [];
+    var seen = {};
+    // Try imgdata global variable first (Baidu image internal data)
+    if (window.imgData && window.imgData.data) {
+        window.imgData.data.forEach(function(item) {
+            if (item.thumbURL || item.objURL || item.middleURL) {
+                results.push({
+                    title: (item.fromPageTitleEnc || item.fromPageTitle || '').substring(0, 100),
+                    url: item.fromURL || '',
+                    image_url: item.objURL || item.middleURL || item.thumbURL,
+                    thumbnail_url: item.thumbURL || item.middleURL || ''
+                });
+            }
+        });
+    }
+    // Fallback: find all img tags with baidu CDN URLs (modern Baidu Image layout)
+    if (results.length === 0) {
+        document.querySelectorAll('img[src*="baidu.com/it/"], img[src*="baiduimage"], img[data-imgurl]').forEach(function(img) {
+            var src = img.getAttribute('data-imgurl') || img.getAttribute('src') || '';
+            if (!src || !src.startsWith('http') || seen[src]) return;
+            // Skip tiny icons and logos
+            var w = img.naturalWidth || img.width || 0;
+            var h = img.naturalHeight || img.height || 0;
+            if (w > 0 && w < 50) return;
+            if (h > 0 && h < 50) return;
+            // Skip result@2 logo
+            if (src.includes('/img/flexible/logo/')) return;
+            seen[src] = true;
+            results.push({
+                title: img.getAttribute('alt') || img.getAttribute('title') || '',
+                url: '',
+                image_url: src,
+                thumbnail_url: src
+            });
+        });
+    }
+    return JSON.stringify(results.slice(0, __MAX__));
+})()
+""",
+    "google_image": """
+(function() {
+    var results = [];
+    document.querySelectorAll('[data-ri], [jsname] img[src^="http"]').forEach(function(el) {
+        var img = el.tagName === 'IMG' ? el : el.querySelector('img');
+        if (!img) return;
+        var src = img.getAttribute('src') || '';
+        if (!src.startsWith('http') || src.includes('gstatic.com/images')) return;
+        var title = img.getAttribute('alt') || '';
+        results.push({
+            title: title.substring(0, 100),
+            url: '',
+            image_url: src,
+            thumbnail_url: src
+        });
+    });
+    return JSON.stringify(results.slice(0, __MAX__));
+})()
+""",
+}
+
+# JS to extract main text content from a page (strips nav/ads/footer)
+EXTRACT_TEXT_JS = """
+(function() {
+    // Remove noise elements
+    var selectors = ['nav', 'header', 'footer', 'aside', '.ad', '.ads', '.sidebar',
+                     '.comment', '.comments', '#comment', '[class*="recommend"]',
+                     '[class*="related"]', 'script', 'style', 'noscript'];
+    selectors.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) { el.remove(); });
+    });
+    // Try article/main content first
+    var main = document.querySelector('article, main, .article, .content, .post, .entry, [class*="article-content"], [class*="post-content"], [role="main"], .lemma-summary, .para[label-module="para"]');
+    if (!main) main = document.body;
+    var text = (main.innerText || '').trim();
+    // Clean up excessive whitespace
+    text = text.replace(/\\n{3,}/g, '\\n\\n').replace(/[ \\t]{2,}/g, ' ');
+    return text.substring(0, 10000);
+})()
+"""
+
 
 # ── Main browser class ───────────────────────────────────────────────────
 
@@ -355,9 +588,39 @@ class PlaywrightBrowser:
             self._context = contexts[0]
         else:
             self._context = await self._browser.new_context(
-                viewport={"width": 1280, "height": 800},
+                viewport={
+                    "width": 1280 + random.randint(-20, 20),
+                    "height": 800 + random.randint(-10, 10),
+                },
                 locale="zh-CN",
+                user_agent=random_ua(),
             )
+
+    # ── Human-like behavior helpers ─────────────────────────────────────
+
+    async def _human_scroll(self, page, rounds: int = 8):
+        """Scroll with human-like randomness in distance, speed, and pauses."""
+        for _ in range(rounds):
+            dist = random.randint(500, 1000)
+            await page.evaluate(f"window.scrollBy(0, {dist})")
+            await page.wait_for_timeout(random.randint(800, 2500))
+            # 15% chance of a longer pause (simulating reading)
+            if random.random() < 0.15:
+                await page.wait_for_timeout(random.randint(2000, 4000))
+
+    async def _human_wait(self, page, min_ms: int = 1500, max_ms: int = 3500):
+        """Random wait simulating human reaction time."""
+        await page.wait_for_timeout(random.randint(min_ms, max_ms))
+
+    async def _human_mouse(self, page):
+        """Random mouse movement to simulate human activity."""
+        try:
+            await page.mouse.move(
+                random.randint(100, 1100), random.randint(100, 600)
+            )
+            await page.wait_for_timeout(random.randint(50, 200))
+        except Exception:
+            pass
 
     async def ensure_logged_in(self, platform: str = "douyin"):
         """Open platform page and wait for user to log in.
@@ -474,10 +737,12 @@ class PlaywrightBrowser:
             return [{"error": f"Unsupported platform: {platform}"}]
 
         url = url_template.format(query=query)
+        await _rate_limiter.wait(url)
         page = await self._context.new_page()
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            _rate_limiter.success(url)
 
             # Handle CAPTCHA / verification / login walls
             await self._handle_verification(page, platform)
@@ -485,10 +750,8 @@ class PlaywrightBrowser:
             # Wait for content
             await self._wait_for_content(page, platform)
 
-            # Scroll extensively to trigger lazy-loading (8 rounds)
-            for i in range(8):
-                await page.evaluate("window.scrollBy(0, 800)")
-                await page.wait_for_timeout(1000)
+            # Scroll extensively to trigger lazy-loading
+            await self._human_scroll(page, rounds=8)
 
             # Take search results page screenshots if requested
             if screenshot_dir:
@@ -496,28 +759,28 @@ class PlaywrightBrowser:
                 screenshot_dir.mkdir(parents=True, exist_ok=True)
                 # Scroll back to top and capture visible area
                 await page.evaluate("window.scrollTo(0, 0)")
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(random.randint(400, 800))
                 await page.screenshot(
                     path=str(screenshot_dir / "search_top.jpg"),
                     full_page=False, type="jpeg", quality=80,
                 )
                 # Capture middle section
                 await page.evaluate("window.scrollBy(0, 1200)")
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(random.randint(400, 800))
                 await page.screenshot(
                     path=str(screenshot_dir / "search_mid.jpg"),
                     full_page=False, type="jpeg", quality=80,
                 )
                 # Capture bottom section
                 await page.evaluate("window.scrollBy(0, 1200)")
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(random.randint(400, 800))
                 await page.screenshot(
                     path=str(screenshot_dir / "search_bot.jpg"),
                     full_page=False, type="jpeg", quality=80,
                 )
 
             await page.evaluate("window.scrollTo(0, 0)")
-            await page.wait_for_timeout(500)
+            await self._human_wait(page, 400, 800)
 
             # Extract results via platform-specific JavaScript
             results = await self._extract_results(page, platform, max_results)
@@ -532,7 +795,7 @@ class PlaywrightBrowser:
 
     async def _handle_verification(self, page, platform: str):
         """Handle CAPTCHA or login walls — wait for user to act in browser."""
-        await page.wait_for_timeout(2000)  # Let page settle
+        await self._human_wait(page, 1500, 3500)  # Let page settle
 
         # Step 1: Check for CAPTCHA by page title
         title = await page.title()
@@ -643,11 +906,11 @@ class PlaywrightBrowser:
             try:
                 await page.wait_for_selector(sel, timeout=15000)
                 # Extra wait for dynamic content to fully render
-                await page.wait_for_timeout(2000)
+                await self._human_wait(page, 1500, 3000)
             except Exception:
-                await page.wait_for_timeout(5000)
+                await self._human_wait(page, 3000, 6000)
         else:
-            await page.wait_for_timeout(3000)
+            await self._human_wait(page, 2000, 4000)
 
     async def _extract_results(self, page, platform: str, max_results: int) -> list[dict]:
         """Run platform-specific extraction JavaScript."""
@@ -678,6 +941,192 @@ class PlaywrightBrowser:
             return save_path
         finally:
             await page.close()
+
+    # ── Web research methods ──────────────────────────────────────────
+
+    async def search_web(
+        self,
+        query: str,
+        engine: str = "baidu",
+        max_results: int = 10,
+    ) -> list[dict]:
+        """Search the web using a search engine.
+
+        Args:
+            query: Search keywords.
+            engine: Search engine (baidu, google, zhihu, baike).
+            max_results: Maximum results to return.
+
+        Returns:
+            List of dicts: [{title, url, snippet}]
+        """
+        await self._ensure_browser()
+
+        url_template = WEB_SEARCH_URLS.get(engine)
+        if not url_template:
+            return [{"error": f"Unsupported search engine: {engine}"}]
+
+        url = url_template.format(query=query)
+        await _rate_limiter.wait(url)
+        page = await self._context.new_page()
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            _rate_limiter.success(url)
+            await self._handle_verification(page, engine)
+
+            # Wait for content to load
+            wait_selectors = {
+                "baidu": ".result, .c-container",
+                "google": "div.g, #search",
+                "zhihu": ".SearchResult-Card, .Card",
+                "baike": ".searchResult, .search-list, .lemma-summary",
+            }
+            sel = wait_selectors.get(engine)
+            if sel:
+                try:
+                    await page.wait_for_selector(sel, timeout=10000)
+                except Exception:
+                    pass
+            await self._human_wait(page, 1500, 3000)
+
+            # Scroll to load more results
+            await self._human_scroll(page, rounds=random.randint(2, 4))
+            await page.evaluate("window.scrollTo(0, 0)")
+            await self._human_wait(page, 400, 800)
+
+            # Extract results
+            js_template = WEB_EXTRACT_JS.get(engine, WEB_EXTRACT_JS.get("baidu", ""))
+            if not js_template:
+                return [{"error": f"No extraction JS for engine: {engine}"}]
+
+            js_code = js_template.replace("__MAX__", str(max_results))
+            result_str = await page.evaluate(js_code)
+            if result_str:
+                return json.loads(result_str)
+            return []
+        except Exception as e:
+            return [{"error": f"Web search failed: {str(e)}"}]
+        finally:
+            await page.close()
+
+    async def search_images(
+        self,
+        query: str,
+        engine: str = "baidu_image",
+        max_results: int = 20,
+    ) -> list[dict]:
+        """Search for images.
+
+        Args:
+            query: Search keywords.
+            engine: Image search engine (baidu_image, google_image).
+            max_results: Maximum results to return.
+
+        Returns:
+            List of dicts: [{title, url, image_url, thumbnail_url}]
+        """
+        await self._ensure_browser()
+
+        url_template = WEB_SEARCH_URLS.get(engine)
+        if not url_template:
+            return [{"error": f"Unsupported image search engine: {engine}"}]
+
+        url = url_template.format(query=query)
+        await _rate_limiter.wait(url)
+        page = await self._context.new_page()
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            _rate_limiter.success(url)
+            await self._human_wait(page, 2000, 4000)
+
+            # Scroll extensively to trigger lazy-loading
+            await self._human_scroll(page, rounds=5)
+            await page.evaluate("window.scrollTo(0, 0)")
+            await self._human_wait(page, 400, 800)
+
+            js_template = WEB_EXTRACT_JS.get(engine, "")
+            if not js_template:
+                return [{"error": f"No extraction JS for engine: {engine}"}]
+
+            js_code = js_template.replace("__MAX__", str(max_results))
+            result_str = await page.evaluate(js_code)
+            if result_str:
+                return json.loads(result_str)
+            return []
+        except Exception as e:
+            return [{"error": f"Image search failed: {str(e)}"}]
+        finally:
+            await page.close()
+
+    async def browse_url(self, url: str) -> dict:
+        """Browse a URL and extract its main text content.
+
+        Args:
+            url: URL to visit.
+
+        Returns:
+            Dict with: {title, url, text_content}
+        """
+        await self._ensure_browser()
+        await _rate_limiter.wait(url)
+        page = await self._context.new_page()
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            _rate_limiter.success(url)
+            await self._handle_verification(page, "")
+            await self._human_wait(page, 2000, 4000)
+            await self._human_mouse(page)
+
+            title = await page.title()
+
+            # Extract main text content
+            text_content = await page.evaluate(EXTRACT_TEXT_JS)
+
+            return {
+                "title": title,
+                "url": url,
+                "text_content": text_content or "(No text content extracted)",
+            }
+        except Exception as e:
+            return {
+                "title": "",
+                "url": url,
+                "text_content": f"(Failed to load page: {str(e)})",
+            }
+        finally:
+            await page.close()
+
+    async def download_image(self, url: str, save_path: Path) -> Path:
+        """Download an image from a URL.
+
+        Args:
+            url: Image URL.
+            save_path: Full path to save the image.
+
+        Returns:
+            Path to saved image.
+        """
+        import httpx
+
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        async with httpx.AsyncClient(
+            timeout=30,
+            follow_redirects=True,
+            verify=False,
+            headers={
+                "User-Agent": random_ua(),
+                "Referer": url,
+            },
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            save_path.write_bytes(resp.content)
+            return save_path
 
     async def close(self):
         """Disconnect Playwright (Chrome stays running for next time)."""

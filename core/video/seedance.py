@@ -10,7 +10,7 @@ Models:
   doubao-seedance-1-0-lite-250428   (lite, fast)
   doubao-seedance-1-0-pro-250428    (standard, higher quality)
   doubao-seedance-1-0-pro-fast-250528 (pro fast)
-  doubao-seedance-1-5-pro-251215    (1.5 pro, supports audio)
+  doubao-seedance-1-5-pro-251215    (1.5 pro, supports audio — DEFAULT)
 
 Auth: ARK_API_KEY as Bearer token.
 
@@ -31,14 +31,16 @@ class SeedanceVideoGen(BaseVideoGen):
     def __init__(
         self,
         api_key: str = "",
-        model: str = "doubao-seedance-1-0-lite-250428",
+        model: str = "doubao-seedance-1-5-pro-251215",
         base_url: str = "https://ark.cn-beijing.volces.com/api/v3",
         resolution: str = "720p",
+        generate_audio: bool = True,
     ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.resolution = resolution
+        self.generate_audio = generate_audio
 
     def _headers(self) -> dict:
         return {
@@ -73,6 +75,7 @@ class SeedanceVideoGen(BaseVideoGen):
             "ratio": aspect_ratio,
             "duration": self._resolve_duration(duration_seconds),
             "resolution": self.resolution,
+            "generate_audio": self.generate_audio,
         }
 
         loop = asyncio.get_event_loop()
@@ -125,6 +128,7 @@ class SeedanceVideoGen(BaseVideoGen):
             "ratio": "adaptive",  # use adaptive for image-to-video
             "duration": self._resolve_duration(duration_seconds),
             "resolution": self.resolution,
+            "generate_audio": self.generate_audio,
         }
 
         loop = asyncio.get_event_loop()

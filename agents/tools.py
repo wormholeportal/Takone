@@ -7,6 +7,7 @@ Extracted from director.py for modularity.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 from .config import Colors, DirectorConfig
@@ -15,8 +16,10 @@ __all__ = [
     # File type constants
     "IMAGE_EXTS",
     "VIDEO_EXTS",
+    "DOCUMENT_EXTS",
     "_MAX_IMAGE_SIZE",
     "_MAX_VIDEO_SIZE",
+    "_MAX_DOC_SIZE",
     # Input parsing
     "_resolve_file_path",
     "_parse_user_input",
@@ -40,8 +43,10 @@ __all__ = [
 
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'}
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv'}
+DOCUMENT_EXTS = {'.txt', '.pdf', '.docx', '.md'}
 _MAX_IMAGE_SIZE = 20 * 1024 * 1024   # 20 MB
 _MAX_VIDEO_SIZE = 200 * 1024 * 1024  # 200 MB
+_MAX_DOC_SIZE = 50 * 1024 * 1024     # 50 MB
 
 
 def _resolve_file_path(token: str) -> Path | None:
@@ -66,23 +71,33 @@ def _parse_user_input(raw_input: str) -> tuple[str, list[dict]]:
     """Parse user input, extracting file paths mixed with text.
 
     Returns (text_content, detected_files) where detected_files is:
-    [{"path": Path, "type": "image"|"video", "original": str}, ...]
+    [{"path": Path, "type": "image"|"video"|"document", "original": str}, ...]
     """
     tokens = raw_input.split()
     text_parts = []
     files = []
 
+    _TYPE_MAP = {
+        **{ext: "image" for ext in IMAGE_EXTS},
+        **{ext: "video" for ext in VIDEO_EXTS},
+        **{ext: "document" for ext in DOCUMENT_EXTS},
+    }
+    _LIMIT_MAP = {
+        "image": _MAX_IMAGE_SIZE,
+        "video": _MAX_VIDEO_SIZE,
+        "document": _MAX_DOC_SIZE,
+    }
+
     for token in tokens:
         # Check suffix on the raw token (works even with shell escapes)
         suffix = Path(token).suffix.lower()
+        ftype = _TYPE_MAP.get(suffix)
 
-        if suffix in IMAGE_EXTS or suffix in VIDEO_EXTS:
+        if ftype:
             resolved = _resolve_file_path(token)
             if resolved:
-                ftype = "image" if suffix in IMAGE_EXTS else "video"
-                # Size check
                 size = resolved.stat().st_size
-                limit = _MAX_IMAGE_SIZE if ftype == "image" else _MAX_VIDEO_SIZE
+                limit = _LIMIT_MAP[ftype]
                 if size > limit:
                     limit_mb = limit // (1024 * 1024)
                     size_mb = size / (1024 * 1024)
@@ -99,40 +114,82 @@ def _parse_user_input(raw_input: str) -> tuple[str, list[dict]]:
     return " ".join(text_parts), files
 
 
+def _extract_document_text(fpath: Path) -> str:
+    """Extract text content from a document file."""
+    suffix = fpath.suffix.lower()
+
+    if suffix == ".txt" or suffix == ".md":
+        return fpath.read_text(encoding="utf-8", errors="replace")
+
+    if suffix == ".pdf":
+        try:
+            import pymupdf
+            doc = pymupdf.open(str(fpath))
+            pages = [page.get_text() for page in doc]
+            doc.close()
+            return "\n\n".join(pages)
+        except ImportError:
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["pdftotext", str(fpath), "-"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode == 0:
+                    return result.stdout
+            except Exception:
+                pass
+            return f"[Unable to extract PDF text — install pymupdf: pip install pymupdf]"
+
+    if suffix == ".docx":
+        try:
+            import docx
+            doc = docx.Document(str(fpath))
+            return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        except ImportError:
+            return f"[Unable to extract DOCX text — install python-docx: pip install python-docx]"
+
+    return f"[Unsupported document format: {suffix}]"
+
+
 def _process_reference_files(
     files: list[dict],
     project_dir: Path | None,
     num_video_frames: int = 4,
 ) -> list[dict]:
-    """Process reference files into base64-encoded image blocks.
+    """Process reference files into base64-encoded image blocks, video refs, or text blocks.
 
     Returns list of dicts:
-    [{"base64": str, "media_type": str, "label": str}, ...]
-    For videos, returns multiple entries (one per extracted frame).
-    Also copies files to project's assets/references/user/.
+    - Image:    {"base64": str, "media_type": str, "label": str}
+    - Video:    {"video": str, "label": str}          # path relative to project
+    - Document: {"text": str, "label": str}
+    Videos are NOT converted to frames here — the LLM should use analyze_media
+    to analyze the video file directly (which uses Vision API with more frames
+    and preserves temporal/motion context).
+    Copies all user files to assets/user/.
     """
     import base64 as b64mod
 
     results = []
-    user_ref_dir = None
+    user_dir = None
     if project_dir:
-        user_ref_dir = project_dir / "assets" / "references" / "user"
-        user_ref_dir.mkdir(parents=True, exist_ok=True)
+        user_dir = project_dir / "assets" / "user"
+        user_dir.mkdir(parents=True, exist_ok=True)
 
     for f in files:
         fpath: Path = f["path"]
         ftype: str = f["type"]
 
-        # Copy to project
-        if user_ref_dir:
-            dest = user_ref_dir / fpath.name
-            # Avoid overwriting by appending a suffix
+        # Copy to project — all user files go to assets/user/
+        dest = None
+        if user_dir:
+            dest = user_dir / fpath.name
             if dest.exists():
                 stem = fpath.stem
                 suffix = fpath.suffix
                 i = 1
                 while dest.exists():
-                    dest = user_ref_dir / f"{stem}_{i}{suffix}"
+                    dest = user_dir / f"{stem}_{i}{suffix}"
                     i += 1
             shutil.copy2(fpath, dest)
 
@@ -152,71 +209,130 @@ def _process_reference_files(
             })
 
         elif ftype == "video":
-            # Extract key frames via FFmpeg
-            try:
-                from core.vision.base import BaseVision
-                frames = BaseVision.extract_frames(fpath, num_video_frames)
-            except Exception:
-                frames = []
+            # Don't extract frames into the conversation — just record the path
+            # so the hint tells the LLM to use analyze_media for full video analysis.
+            rel_path = f"assets/user/{dest.name}" if dest else f"assets/user/{fpath.name}"
+            results.append({
+                "video": rel_path,
+                "label": fpath.name,
+            })
 
-            if not frames:
-                print(f"  {Colors.YELLOW}⚠ Failed to extract video frames (FFmpeg required): {fpath.name}{Colors.ENDC}")
-                continue
-
-            for frame in frames:
-                with open(frame, "rb") as fp:
-                    data = b64mod.b64encode(fp.read()).decode()
+        elif ftype == "document":
+            text = _extract_document_text(fpath)
+            if text:
                 results.append({
-                    "base64": data,
-                    "media_type": "image/jpeg",
-                    "label": f"{fpath.name} (frame)",
+                    "text": text,
+                    "label": fpath.name,
                 })
-
-            # Cleanup temp frames
-            for frame in frames:
-                try:
-                    frame.unlink()
-                except Exception:
-                    pass
 
     return results
 
 
-def _build_multimodal_anthropic(text: str, images: list[dict]) -> list:
-    """Build Anthropic multimodal content array."""
-    content = []
-    for img in images:
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": img["media_type"],
-                "data": img["base64"],
-            },
-        })
-    hint = (
-        "[User provided reference materials (images above). Please analyze these reference materials "
-        "for style, color, composition, character features, etc., and incorporate these reference "
-        "characteristics into subsequent creative work. Reference materials saved to assets/references/user/.]\n\n"
+def _build_media_hint(
+    media: list[dict],
+    position: str = "above",
+) -> str:
+    """Build a hint string describing user-provided media.
+
+    Handles three item types: base64 images, video references, and documents.
+    Tells the LLM exact local paths and instructs it to use analyze_media.
+    """
+    image_labels = [item["label"] for item in media if "base64" in item]
+    video_paths = [item["video"] for item in media if "video" in item]
+
+    if not image_labels and not video_paths:
+        return ""
+
+    parts = []
+    if video_paths:
+        vlist = ", ".join(video_paths)
+        parts.append(
+            f"User provided reference video(s) saved to: {vlist}. "
+            "IMPORTANT: You must call analyze_media with the video file_path to analyze "
+            "the video content (motion, rhythm, transitions, style, etc.). "
+            "The video has NOT been inlined in this conversation — analyze_media is the "
+            "only way to see it."
+        )
+    if image_labels:
+        ilist = ", ".join(f"assets/user/{fn}" for fn in image_labels)
+        parts.append(
+            f"User provided reference images ({position}). "
+            f"Image files saved to: {ilist}. "
+            "Use analyze_media with these paths for detailed analysis."
+        )
+
+    parts.append(
+        "All reference files are already saved locally — do NOT attempt to download "
+        "any URLs. Analyze style, color, composition, character features, etc., "
+        "and incorporate into subsequent creative work."
     )
+    return "[" + " ".join(parts) + "]"
+
+
+def _build_multimodal_anthropic(text: str, media: list[dict]) -> list:
+    """Build Anthropic multimodal content array (images + documents)."""
+    content = []
+    doc_texts = []
+
+    for item in media:
+        if "base64" in item:
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": item["media_type"],
+                    "data": item["base64"],
+                },
+            })
+        elif "text" in item:
+            doc_texts.append(f"--- {item['label']} ---\n{item['text']}")
+        # "video" items have no inline content — handled by hint only
+
+    hints = []
+    media_hint = _build_media_hint(media, position="above")
+    if media_hint:
+        hints.append(media_hint)
+    if doc_texts:
+        hints.append(
+            "[User provided reference documents. Please read and understand the content below, "
+            "and incorporate relevant information into subsequent creative work. "
+            "Documents saved to assets/user/.]\n\n" + "\n\n".join(doc_texts)
+        )
+
+    hint = "\n\n".join(hints) + "\n\n" if hints else ""
     content.append({"type": "text", "text": hint + text})
     return content
 
 
-def _build_multimodal_openai(text: str, images: list[dict]) -> list:
-    """Build OpenAI multimodal content array."""
-    hint = (
-        "[User provided reference materials (images below). Please analyze these reference materials "
-        "for style, color, composition, character features, etc., and incorporate these reference "
-        "characteristics into subsequent creative work. Reference materials saved to assets/references/user/.]\n\n"
-    )
+def _build_multimodal_openai(text: str, media: list[dict]) -> list:
+    """Build OpenAI multimodal content array (images + documents)."""
+    doc_texts = []
+
+    for item in media:
+        if "text" in item:
+            doc_texts.append(f"--- {item['label']} ---\n{item['text']}")
+        # "video" items have no inline content — handled by hint only
+
+    hints = []
+    media_hint = _build_media_hint(media, position="below")
+    if media_hint:
+        hints.append(media_hint)
+    if doc_texts:
+        hints.append(
+            "[User provided reference documents. Please read and understand the content below, "
+            "and incorporate relevant information into subsequent creative work. "
+            "Documents saved to assets/user/.]\n\n" + "\n\n".join(doc_texts)
+        )
+
+    hint = "\n\n".join(hints) + "\n\n" if hints else ""
     content = [{"type": "text", "text": hint + text}]
-    for img in images:
-        data_url = f"data:{img['media_type']};base64,{img['base64']}"
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": data_url},
-        })
+    for item in media:
+        if "base64" in item:
+            data_url = f"data:{item['media_type']};base64,{item['base64']}"
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            })
     return content
 
 
@@ -227,7 +343,9 @@ PROVIDER_REGISTRY: dict[str, tuple[str, str | None]] = {
     "claude":   ("anthropic", None),
     "minimax":  ("openai",    "https://api.minimax.io/v1"),
     "openai":   ("openai",    None),
-    "moonshot": ("openai",    "https://api.moonshot.cn/v1"),
+    "moonshot": ("openai",    "https://api.moonshot.ai/v1"),
+    "kimi":     ("openai",    "https://api.moonshot.ai/v1"),
+    "zhipu":    ("openai",    "https://open.bigmodel.cn/api/paas/v4"),
     "doubao":   ("openai",    "https://ark.cn-beijing.volces.com/api/v3"),
     "qwen":     ("openai",    "https://dashscope.aliyuncs.com/compatible-mode/v1"),
 }
@@ -256,12 +374,16 @@ def _resolve_llm_config(config: DirectorConfig) -> tuple[str, str, str, str | No
                      config.llm.minimax_model),
         "openai":   (config.llm.openai_api_key or os.getenv("OPENAI_API_KEY", ""),
                      config.llm.openai_model),
-        "moonshot": (config.llm.openai_api_key or os.getenv("MOONSHOT_API_KEY", ""),
-                     config.llm.openai_model),
+        "moonshot": (config.llm.moonshot_api_key or os.getenv("MOONSHOT_API_KEY", ""),
+                     config.llm.moonshot_model),
+        "kimi":     (config.llm.kimi_api_key or os.getenv("MOONSHOT_API_KEY", ""),
+                     config.llm.kimi_model),
+        "zhipu":    (config.llm.zhipu_api_key or os.getenv("ZHIPU_API_KEY", ""),
+                     config.llm.zhipu_model),
         "doubao":   (config.llm.ark_api_key or os.getenv("ARK_API_KEY", ""),
                      config.llm.ark_model),
-        "qwen":     (config.llm.openai_api_key or os.getenv("QWEN_API_KEY", ""),
-                     config.llm.openai_model),
+        "qwen":     (config.llm.qwen_api_key or os.getenv("QWEN_API_KEY", "") or os.getenv("DASHSCOPE_API_KEY", ""),
+                     config.llm.qwen_model),
     }
 
     api_key, model = key_map[provider]
@@ -271,6 +393,8 @@ def _resolve_llm_config(config: DirectorConfig) -> tuple[str, str, str, str | No
             "minimax": "MINIMAX_API_KEY",
             "openai": "OPENAI_API_KEY",
             "moonshot": "MOONSHOT_API_KEY",
+            "kimi": "MOONSHOT_API_KEY",
+            "zhipu": "ZHIPU_API_KEY",
             "doubao": "ARK_API_KEY",
             "qwen": "QWEN_API_KEY",
         }[provider]
@@ -287,14 +411,15 @@ TOOLS_ANTHROPIC = [
         "description": (
             "Save a YAML or JSON file to the project directory. "
             "Use this whenever you have generated enough content for a file. "
-            "Supported files: screenplay.yaml, storyboard.yaml, prompts.json, review.yaml."
+            "Primary files: feeling.yaml, shots.yaml. "
+            "Legacy files also supported: screenplay.yaml, storyboard.yaml, prompts.json, review.yaml."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "filename": {
                     "type": "string",
-                    "description": "Filename to save (e.g. 'screenplay.yaml', 'storyboard.yaml', 'prompts.json')",
+                    "description": "Filename to save (e.g. 'feeling.yaml', 'shots.yaml', 'prompts.json')",
                 },
                 "content": {
                     "type": "string",
@@ -329,20 +454,19 @@ TOOLS_ANTHROPIC = [
         "description": (
             "Load skill knowledge on demand. Call this when you need detailed guidance.\n\n"
             "Available skills and files:\n"
-            "- pipeline/SKILL.md — Pipeline overview, stage routing, quality gates\n"
-            "- scriptwriter/SKILL.md — Screenplay methodology, platform adaptation\n"
-            "- scriptwriter/template.md — screenplay.yaml schema (MUST load before saving)\n"
+            "- pipeline/SKILL.md — 4-stage pipeline (Discover/Design/Generate/Assemble), shot budget\n"
+            "- scriptwriter/SKILL.md — Feeling-first creation, shots.yaml format\n"
+            "- scriptwriter/template.md — shots.yaml schema (load before saving)\n"
             "- scriptwriter/reference.md — Example scripts, style guides\n"
-            "- storyboard/SKILL.md — Shot types, camera language, composition\n"
-            "- storyboard/template.md — storyboard.yaml schema (MUST load before saving)\n"
-            "- storyboard/reference.md — Storyboard examples\n"
+            "- storyboard/SKILL.md — Cinematic reference guide (shot types, camera, composition)\n"
             "- visualizer/SKILL.md — Provider-specific prompt optimization\n"
-            "- visualizer/template.md — prompts.json schema (MUST load before saving)\n"
+            "- visualizer/template.md — prompts.json schema (legacy format)\n"
             "- visualizer/reference.md — Example prompts for each provider\n"
             "- designer/SKILL.md — Character/scene reference design for consistency\n"
-            "- reviewer/SKILL.md — Quality criteria, common issues\n"
-            "- reviewer/template.md — review.yaml schema (MUST load before saving)\n\n"
-            "Tip: Load the relevant template.md BEFORE saving any file to ensure correct schema."
+            "- reviewer/SKILL.md — Scroll-stop test, visual quality checks\n"
+            "- learn/SKILL.md — Mandatory research, feeling extraction\n"
+            "- memory/SKILL.md — When and how to read and update user memory\n\n"
+            "Tip: Load scriptwriter/SKILL.md for the shots.yaml format before designing shots."
         ),
         "input_schema": {
             "type": "object",
@@ -350,7 +474,7 @@ TOOLS_ANTHROPIC = [
                 "skill": {
                     "type": "string",
                     "description": "Skill name",
-                    "enum": ["pipeline", "scriptwriter", "storyboard", "visualizer", "designer", "reviewer"],
+                    "enum": ["pipeline", "scriptwriter", "storyboard", "visualizer", "designer", "reviewer", "learn", "memory"],
                 },
                 "file": {
                     "type": "string",
@@ -367,7 +491,11 @@ TOOLS_ANTHROPIC = [
             "Generate character reference sheet or scene reference images for visual consistency. "
             "Character refs: multi-view on single image (front/side/back). "
             "Scene refs: key environment from specific angle. "
-            "Saved to assets/references/. Must be done BEFORE shot generation."
+            "Saved to assets/design/. Must be done BEFORE shot generation. "
+            "IMPORTANT: You MUST choose aspect_ratio based on sub-image count and orientation — "
+            "the canvas must have enough space for all views with correct human proportions. "
+            "For character sheets: 2 views → 3:4, 3 views → 3:2, 4+ views → 16:9. "
+            "For scenes: match the project's default ratio."
         ),
         "input_schema": {
             "type": "object",
@@ -383,25 +511,36 @@ TOOLS_ANTHROPIC = [
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Generation prompt for the reference image",
+                    "description": (
+                        "Generation prompt. For characters: MUST include detailed physical description "
+                        "(height, body proportions, face, hair, clothing details, colors), full style_anchor, "
+                        "AND multi-view keywords. Emphasize 'correct human anatomy, natural body proportions, "
+                        "proper head-to-body ratio' to avoid distortion. Prompt must be detailed (100+ words)."
+                    ),
                 },
                 "aspect_ratio": {
                     "type": "string",
-                    "enum": ["1:1", "9:16", "16:9", "3:4", "4:3"],
-                    "description": "1:1 for character sheets, 16:9 for scene panoramas, 9:16 for portrait scene refs (default: 1:1)",
+                    "enum": ["1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3"],
+                    "description": (
+                        "REQUIRED. Choose based on sub-image layout: "
+                        "2 views side-by-side → 3:4; "
+                        "3 views side-by-side → 3:2 or 16:9; "
+                        "4-5 views → 16:9; "
+                        "single scene → match project ratio. "
+                        "Wrong ratio causes figure distortion!"
+                    ),
                 },
             },
-            "required": ["ref_type", "ref_id", "prompt"],
+            "required": ["ref_type", "ref_id", "prompt", "aspect_ratio"],
         },
     },
     {
         "name": "generate_image",
         "description": (
-            "Generate a key frame image for a specific shot using Seedream. "
-            "The image will be saved to assets/images/. "
-            "Automatically: 1) loads reference_images from prompts.json for character/scene consistency, "
-            "2) appends style_anchor from prompts.json for global style consistency. "
-            "Use this after prompts.json and reference images are ready."
+            "Generate key frame image(s) for a specific shot using Seedream. "
+            "Saved to assets/image/. Use 'variations' to generate multiple versions "
+            "for comparison (recommended: 3-5 for short videos). "
+            "Automatically loads reference_images and style_anchor from shots.yaml/prompts.json."
         ),
         "input_schema": {
             "type": "object",
@@ -412,12 +551,47 @@ TOOLS_ANTHROPIC = [
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Image generation prompt (or leave empty to use prompts.json)",
+                    "description": "Image generation prompt (or leave empty to use shots.yaml/prompts.json)",
                 },
                 "aspect_ratio": {
                     "type": "string",
                     "description": "Aspect ratio (default: from project config)",
                     "enum": ["1:1", "9:16", "16:9", "3:4", "4:3"],
+                },
+                "variations": {
+                    "type": "integer",
+                    "description": "Number of variations to generate for comparison (default: 1, recommended: 3-5 for important shots)",
+                    "minimum": 1,
+                    "maximum": 5,
+                },
+            },
+            "required": ["shot_id"],
+        },
+    },
+    {
+        "name": "compare_shots",
+        "description": (
+            "Compare multiple image/video variations and select the best one. "
+            "Sends all variations to vision model with the prompt: "
+            "'Which would make you stop scrolling on Douyin?' "
+            "Returns ranked results. Use after generating multiple variations."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "shot_id": {
+                    "type": "string",
+                    "description": "Shot ID whose variations to compare (e.g. 'SHOT_001')",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "Type of media to compare",
+                    "enum": ["image", "video"],
+                    "default": "image",
+                },
+                "reference_path": {
+                    "type": "string",
+                    "description": "Optional path to a reference image to compare against (from feeling.yaml references)",
                 },
             },
             "required": ["shot_id"],
@@ -428,7 +602,7 @@ TOOLS_ANTHROPIC = [
         "description": (
             "Generate a video clip for a specific shot using Seedance. "
             "Can generate from text or from a first-frame image. "
-            "The video will be saved to assets/videos/. "
+            "The video will be saved to assets/video/. "
             "Automatically injects opening_state/closing_state from prompts.json "
             "for shot-to-shot continuity, and appends style_anchor for style consistency."
         ),
@@ -466,7 +640,7 @@ TOOLS_ANTHROPIC = [
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to image or video file relative to project (e.g. 'assets/images/shot_001.png')",
+                    "description": "Path to image or video file relative to project (e.g. 'assets/image/shot_001.png')",
                 },
                 "prompt": {
                     "type": "string",
@@ -500,6 +674,56 @@ TOOLS_ANTHROPIC = [
         },
     },
     {
+        "name": "evaluate_shot",
+        "description": (
+            "Evaluate a generated shot using Walter Murch's editing priorities "
+            "(Emotion 51%, Story 23%, Rhythm 10%, Eye-trace 7%, 2D Composition 5%, "
+            "3D Space 4%). Sends the current shot plus context from recent confirmed "
+            "shots to vision API. Returns PASS/FAIL verdict with dimension scores and "
+            "actionable fix suggestions. Call after generate_image or generate_video "
+            "to decide whether to accept or regenerate the shot."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "shot_id": {
+                    "type": "string",
+                    "description": "Current shot ID being evaluated (e.g. 'SHOT_003')",
+                },
+                "media_type": {
+                    "type": "string",
+                    "enum": ["image", "video"],
+                    "description": "'image' for keyframe evaluation, 'video' for video clip evaluation",
+                },
+                "context_shot_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "IDs of previous confirmed shots for sequence context "
+                        "(e.g. ['SHOT_001', 'SHOT_002']). Recommend last 2-3 shots. "
+                        "Empty array for the first shot."
+                    ),
+                },
+                "emotion_context": {
+                    "type": "string",
+                    "description": (
+                        "Where we are on the emotion curve: what the audience should "
+                        "feel at this point, what came before emotionally, what comes next. "
+                        "If not provided, auto-extracted from storyboard.yaml."
+                    ),
+                },
+                "story_context": {
+                    "type": "string",
+                    "description": (
+                        "What narrative beat this shot belongs to and what it should advance. "
+                        "If not provided, auto-extracted from storyboard.yaml."
+                    ),
+                },
+            },
+            "required": ["shot_id", "media_type"],
+        },
+    },
+    {
         "name": "search_reference",
         "description": (
             "Search for trending/viral videos online using Playwright browser. "
@@ -519,6 +743,104 @@ TOOLS_ANTHROPIC = [
                 },
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "learn_browse",
+        "description": (
+            "Browse the web for creative research. Supports: "
+            "web search (baidu/google/zhihu/baike), "
+            "image search (baidu_image/google_image — auto-downloads top 3 + vision analysis), "
+            "video search (douyin/bilibili/xiaohongshu/youtube), "
+            "or direct URL browsing to extract page content. "
+            "search_images results include 'vision_analysis' with actual visual content description. "
+            "For platforms requiring login, will wait for user to complete login. "
+            "Load the 'learn' skill first for research methodology."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["search_web", "search_images", "search_videos", "browse_url"],
+                    "description": (
+                        "search_web: text search on baidu/google/zhihu/baike; "
+                        "search_images: image search on baidu_image/google_image; "
+                        "search_videos: video search on douyin/bilibili/xiaohongshu/youtube; "
+                        "browse_url: visit a URL and extract its main text content"
+                    ),
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search keywords (for search actions) or full URL (for browse_url). "
+                        "E.g. '武松打虎 历史背景' or 'https://baike.baidu.com/item/武松打虎'"
+                    ),
+                },
+                "platform": {
+                    "type": "string",
+                    "description": (
+                        "Platform/engine to use. "
+                        "For search_web: baidu (default), google, zhihu, baike. "
+                        "For search_images: baidu_image (default), google_image. "
+                        "For search_videos: douyin (default), bilibili, xiaohongshu, youtube. "
+                        "Not needed for browse_url."
+                    ),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max results to return. Default: 10 for web, 20 for images/videos.",
+                },
+            },
+            "required": ["action", "query"],
+        },
+    },
+    {
+        "name": "learn_download",
+        "description": (
+            "Download reference materials (images, videos, files) to assets/learn/. "
+            "IMPORTANT: Download sparingly — only the most valuable 2-3 items per research session. "
+            "Prefer browsing and noting URLs over downloading. Never batch-download search results. "
+            "Images are auto-analyzed by vision AI (style, color, composition). "
+            "Videos via yt-dlp, limited to 1080p and 5 minutes. "
+            "IMPORTANT for videos: url MUST be a specific video page URL "
+            "(e.g. douyin.com/video/xxxxx, bilibili.com/video/BVxxxxx), "
+            "NOT a search/listing/hashtag page. Use learn_browse first to find video URLs. "
+            "Falls back to browser screenshot if direct download fails. "
+            "Downloaded images can be used directly in prompts.json reference_images by filename. "
+            "A 2-5 second delay is enforced between consecutive downloads to respect server limits."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "URL to download from",
+                },
+                "media_type": {
+                    "type": "string",
+                    "enum": ["image", "video", "file"],
+                    "description": (
+                        "image: direct HTTP download; "
+                        "video: yt-dlp download (for platform videos); "
+                        "file: generic HTTP download"
+                    ),
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Custom filename (optional). Auto-generated if not provided.",
+                },
+                "analyze": {
+                    "type": "boolean",
+                    "description": (
+                        "Auto-analyze downloaded images using vision AI. "
+                        "Produces structured analysis of style, color, composition, lighting. "
+                        "Analysis saved as .analysis.md sidecar file. "
+                        "Default: true for images, ignored for video/file."
+                    ),
+                },
+            },
+            "required": ["url", "media_type"],
         },
     },
     {
@@ -632,6 +954,54 @@ TOOLS_ANTHROPIC = [
             },
         },
     },
+    {
+        "name": "memory_read",
+        "description": (
+            "Read memory files from ~/.takone/memory/. "
+            "Call with no arguments to read MEMORY.md (the main index). "
+            "Call with a filename to read a specific topic file (e.g., 'projects.md', 'feedback.md').\n\n"
+            "When to read:\n"
+            "- At session start: memory_read() to load user preferences\n"
+            "- When user references past work: memory_read('projects.md')\n"
+            "- When making subjective creative decisions: check preferences in MEMORY.md"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "File to read (default: 'MEMORY.md'). Examples: 'MEMORY.md', 'projects.md', 'feedback.md'",
+                },
+            },
+        },
+    },
+    {
+        "name": "memory_write",
+        "description": (
+            "Write a memory file to ~/.takone/memory/. The content replaces the entire file. "
+            "To update, first memory_read the file, integrate new info, then memory_write the full updated content. "
+            "Do NOT announce memory updates to the user — just do it silently.\n\n"
+            "When to write:\n"
+            "- User expresses aesthetic preference → update MEMORY.md\n"
+            "- User corrects/rejects a choice → update MEMORY.md + feedback.md\n"
+            "- Project completes → update MEMORY.md summary + projects.md details\n\n"
+            "Keep MEMORY.md under 200 lines. Move details to topic files."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "File to write (default: 'MEMORY.md'). Examples: 'MEMORY.md', 'projects.md', 'feedback.md'",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full markdown content to write to the file.",
+                },
+            },
+            "required": ["content"],
+        },
+    },
 ]
 
 
@@ -655,275 +1025,205 @@ TOOLS_OPENAI = _tools_to_openai(TOOLS_ANTHROPIC)
 
 # ── System prompt ──────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a professional AI video director, specializing in transforming creative ideas into high-quality short videos.
+SYSTEM_PROMPT = """You are a professional AI video director. You create short videos (10-60 seconds for Douyin/TikTok, or 1-3 minutes max) that make people stop scrolling.
 
-## How You Work
+## Core Philosophy
 
-You learn about the user's video concept through natural conversation, then autonomously drive the entire production pipeline.
-You are not an assembly line — you are a director with creative judgment. **Quality is your bottom line — you would rather spend more time polishing than produce rough work.**
+**The essence of creation is FEELING.** Not structure, not process, not checklists — feeling.
+
+You are not an assembly line. You are a director with taste. Before you write a single word of script, you must FEEL what the video should be. And the only way to develop that feeling is to study what already works.
+
+## Memory — Knowing Your User
+
+You have persistent memory in `~/.takone/memory/`. Read `memory_read()` at session start. Write `memory_write()` silently when you learn preferences, corrections, or project outcomes. Keep MEMORY.md under 200 lines.
 
 ## The Director's Three-Layer Thinking
 
-Every creative decision you make must go through three layers of thinking, **strictly in order**:
+Every creative decision, strictly in order:
 
-**Layer 1: Emotional Intent (WHY)**
-- What should the audience feel from this video?
-- At this specific moment, where should the audience's emotion be on the curve?
+1. **FEELING (WHY)** — What should the audience feel? Trust your gut first.
+2. **TECHNIQUE (HOW)** — What cinematic tools create that feeling? (shot size, movement, lighting, color, rhythm)
+3. **CONTENT (WHAT)** — What's in the frame? This is LAST, not first.
 
-**Layer 2: Cinematic Tools (HOW)**
-- What cinematic language conveys this emotion? (shot size, camera movement, lighting, rhythm)
-- Consult the "Cinematic Language Translator" in storyboard SKILL.md to reverse-engineer technical approach from emotion
+**Never start from Layer 3.** If you're thinking "cherry blossom tree" before asking "what should this feel like," go back to Layer 1.
 
-**Layer 3: Visual Content (WHAT)**
-- What exactly is in the frame? Colors, objects, characters, actions
-- This is the last thing to decide, not the first
+## The Four-Stage Pipeline
 
-**Never start from Layer 3.** If you find yourself thinking "this shot should have a cherry blossom tree" without first asking "what should this shot make the audience feel," you have skipped the first two layers. Go back to Layer 1.
+### Stage 1: DISCOVER — Find Your Feeling (MANDATORY)
 
-## Warning: Most Important Principle — Every Step Must Include Reflection, Evaluation, and Iteration
+**Before writing ANY script or shots, you MUST research.** This is not optional.
 
-**Absolutely no "single-pass" work** — You cannot generate screenplay.yaml and immediately move to storyboard.yaml, nor generate storyboard.yaml and jump straight to prompts.json. After generating each file, you must:
+1. **Search platforms** — Use `learn_browse` to search Douyin/Bilibili/Xiaohongshu for the best content in your target category
+2. **Download references** — Use `learn_download` to save the 3-5 best reference frames/images
+3. **Analyze with vision** — Use `analyze_media` on downloaded references: Why does this work? What feeling does it create? What technique drives it?
+4. **Write feeling.yaml** — Your creative anchor:
+   ```yaml
+   target_feeling: "The viewer should feel ___"
+   references:
+     - image: "assets/learn/ref_01.png"
+       why: "The slow reveal through mist creates perfect tension"
+   visual_dna:
+     color_mood: "cold tones, blue-gray dominant"
+     pacing: "slow build → explosive release"
+     first_3_seconds: "static frame, sudden motion"
+   anti_patterns:
+     - "no cartoon look"
+     - "no over-saturated colors"
+   ```
+5. **Only after research, proceed to Stage 2**
 
-1. **Use read_file to read the file you just saved**
-2. **Check against reflection/evaluation criteria item by item** (load the reviewer skill to get evaluation criteria)
-3. **Identify at least 2-3 areas for improvement** (no file is perfect on the first pass)
-4. **Revise and save again**
-5. **Use read_file again to confirm the changes took effect**
-6. **Only proceed to the next stage after confirming no critical issues remain**
+Research is also available at ANY point later — whenever you're unsure about something, search for it.
 
-This is not a suggestion — it is mandatory. If you skip reflection and jump to the next step, the generated video quality will be extremely poor.
+### Stage 2: DESIGN — Write Your Shots + Generate Character References
 
-## Conversation and Creative Workflow
+Load `scriptwriter`, `visualizer`, and `designer` skills. Create `shots.yaml`, then generate character reference images.
 
-### Step 1: Understand Requirements
-- What type? What platform? What style? How long? Any references?
-- Even if the user gives just one sentence, you expand and fill in the gaps yourself
+```yaml
+feeling: "One sentence — what should watching this FEEL like"
+style_anchor: "50-100 word visual style description (render, color, lighting, texture, exclusions)"
+characters:
+  - id: character_name
+    visual: "50-100 word character appearance"
+    inner_desire: "what drives them"
+references:
+  - image: "assets/design/character_name.png"
 
-### Step 0: Emotional Blueprint (Before Writing Any Scenes!)
-1. Based on the user's concept, first design the **emotion_curve** — the emotional intensity curve for the entire video
-   - Mark 5-8 time points with emotional intensity (0-10) and emotion type
-   - Must have rises and falls — flat lines are forbidden. There must be a valley before the climax (contrast amplifies impact)
-2. Design 2-3 **memory_points** — moments the audience cannot forget
-   - Each memory point = an extreme visual + emotional combination
-   - Not just "beautiful," but "lingers in your mind long after watching"
-   - The entire story revolves around memory points
-3. Define **characters** psychology for each character:
-   - inner_desire (inner longing, not external goals)
-   - core_conflict (the contradiction blocking the desire)
-   - arc (internal transformation from ___ to ___)
-   - signature_detail (one specific detail representing the character's soul)
-4. These three elements are the "foundation" of all subsequent creative work — without them, you are building on sand
+shots:
+  - id: SHOT_001
+    feeling: "what this specific shot should evoke"
+    duration: 3
+    prompt: "detailed image generation prompt including style_anchor"
+    video_prompt: >
+      motion description with opening/closing states.
+      [If narration:] The narrator says in a calm voice "他走了很远的路",
+      footsteps on gravel, wind, melancholic piano underscore.
+    reference_images: ["character_name"]
+    transition_out: cut
+    audio:                    # optional — creative intent for sound
+      narration:
+        speaker: "narrator"
+        text: "他走了很远的路"
+        tone: "calm, nostalgic"
+      music: "melancholic piano"
+      sfx: "footsteps, wind"
+```
 
-### Step 2: Write the Script (Must Iterate)
-1. load_skill("scriptwriter", "SKILL.md") + load_skill("scriptwriter", "template.md") to load scriptwriting methodology and YAML schema
-2. **First define emotion_curve + memory_points + characters, then define narrative_beats, and finally write scenes** (this order is critical!)
-   - Common structures: hook → setup → development → climax → resolution
-   - Advertising: hook → pain_point → solution → cta
-   - Tutorial: hook_result → setup → step_by_step → recap
-3. Each beat must be tagged with pacing (fast/medium/slow/building) and target_duration_seconds
-4. Duration allocation rules:
-   - **hook**: 1-5 seconds (shorter is better — lead with the most striking visuals)
-   - **setup**: 15-20% of total video length
-   - **development**: 40-60% (core content, tightest pacing)
-   - **climax**: 10-20% (not the shortest beat, but the "slowest" beat — let the audience fully absorb it)
-   - **resolution**: 10-15%
-5. All scenes must link to a beat via beat_ref — a scene without a beat association is a wasted scene and must be removed
-6. Write screenplay.yaml and save_file
-7. **[Mandatory Reflection]** Immediately read_file("screenplay.yaml") and self-check against these dimensions:
-   - **Creative Impact (Highest Priority)**:
-     - Does emotion_curve have genuine rises and falls? Is there a "valley → peak" contrast?
-     - Are memory_points striking enough? "What will linger in the viewer's mind after watching?"
-     - Do characters have psychological arcs (inner_desire + arc)? Or just appearance descriptions + actions?
-   - **Narrative Structure**:
-     - Are there narrative_beats? Is there a hook and climax?
-     - Is there a strong hook in the first 3 seconds? Can it grab the audience?
-     - Does the narrative have ups and downs? Suspense, twists, surprises? Or is it a flat chronological account?
-     - Are there wasted scenes? Does every scene advance the narrative? Does each have a beat_ref?
-   - **Rhythm and Breathing**:
-     - Is duration allocation reasonable? Does pacing vary between beats?
-     - Does information density have a wave pattern (dense-sparse-dense-sparse)? Or constant throughout?
-   - **Consistency**: Period/logic consistency — do props, architecture, costumes, and transportation match the story's setting?
-   - **Visual Description Quality**:
-     - Is each scene's visual_description a coherent prose passage (200-600 words)? Not fragmented short phrases?
-     - After reading the description, can you close your eyes and "see" the image? Are there parts too vague to visualize?
-     - Are colors specific (cobalt blue/burnt sienna/pale yellow)? Are positions precise (at the right-third line of the frame)?
-     - Is the same character described consistently across scenes, matching characters.visual_definition?
-     - Do adjacent scenes' temporal_change (closing_state → opening_state) flow naturally?
-     - Does visual_description use YAML `>` folded scalar (not `|`)?
-8. **Identify issues, revise screenplay.yaml, and save again**
-9. read_file again to confirm improvements
-10. Present the final script highlights to the user and wait for confirmation
+**Shot Budget (STRICT):**
 
-### Step 3: Storyboard Refinement (Must Iterate)
-1. load_skill("storyboard", "SKILL.md") + load_skill("storyboard", "template.md")
-2. Generate storyboard.yaml from screenplay.yaml (with detailed visual descriptions). **Each shot must include**:
-   - `cinematic_intent` — **Most important**: "Make the audience feel ___" — write this first, then reverse-engineer shot size/movement/lighting
-   - `emotional_intensity` — 0-10, corresponding to emotion_curve (3 consecutive identical values = flat line = needs revision)
-   - `breathing` — inhale/exhale/hold/rest (must be inhale before climax)
-   - `rhythm_relationship` — acceleration/deceleration/contrast/continuation (3 consecutive continuation = rhythm death)
-   - `memory_point_ref` — if this is a memory anchor shot, reference the MP id
-   - `beat_ref` — which narrative beat this shot belongs to (required, must correspond to screenplay's narrative_beats)
-   - `pacing_intent` — fast/medium/slow, determines shot duration and editing rhythm
-   - `cut_on` — action/emotion/rhythm/visual_match, determines edit point type
-   - `trim_start`/`trim_end`/`use_duration` — trimming parameters automatically used during assembly
-   - `transition_out` — transition type from this shot to the next (automatically used during assembly)
-3. save_file to save storyboard.yaml
-4. **[Mandatory Reflection]** Immediately read_file("storyboard.yaml") and check:
-   - **Emotion and Rhythm (Highest Priority)**:
-     - Does each shot have a cinematic_intent? Is it derived from emotion or chosen arbitrarily?
-     - Does emotional_intensity have variation? 3 consecutive identical values = flat line = needs revision
-     - Does breathing alternate? Is there "inhale" before the climax?
-     - Does rhythm_relationship avoid consecutive "continuation"?
-   - **Structure**:
-     - Does every shot have a beat_ref? Does it match screenplay's narrative_beats?
-     - Does pacing_intent vary? (All shots being medium = no rhythm)
-   - **Continuity**:
-     - Does every shot have opening_state and closing_state?
-     - Do adjacent shots' closing_state → opening_state flow coherently?
-   - **Technical**:
-     - Do all key_elements match the period setting?
-     - Are transitions appropriate? Hard cuts for hooks, dissolve/fade for emotional segments?
-     - Is use_duration allocation reasonable? Hook shots should not exceed 3 seconds; climax shots can be longer
-5. **Identify issues, revise storyboard.yaml, and save again**
-6. read_file again to confirm
+| Target Duration | Max Shots | Variations Per Shot |
+|----------------|-----------|-------------------|
+| 5-15 seconds   | 1-3       | Generate 5, pick best |
+| 15-30 seconds  | 3-5       | Generate 3, pick best |
+| 30-60 seconds  | 5-8       | Generate 2, pick best |
+| 1-3 minutes    | 8-15      | Generate 2, pick best |
 
-### Step 4: Prompt Design (Must Iterate)
-1. load_skill("visualizer", "SKILL.md") + load_skill("visualizer", "template.md")
-2. load_skill("designer", "SKILL.md") to determine style_anchor strategy
-2.5. **read_file("screenplay.yaml") to get detailed visual descriptions (visual_description)** as core material for prompts
-3. **First establish the style_anchor** (a detailed 50-100 word art style description), write it into prompts.json
-4. Write prompts for each shot — every shot must specify reference_images — then save_file
-5. **[Mandatory Reflection]** Immediately read_file("prompts.json") and check:
-   - Is style_anchor detailed enough? Does it cover rendering style, color palette, lighting, texture, exclusions?
-   - Does each prompt fully include style_anchor?
-   - Is the same character described consistently across different prompts?
-   - Does video_prompt include opening_state and closing_state descriptions?
-   - Do reference_images cover all recurring characters/scenes?
-   - Are there any anachronistic element descriptions?
-6. **Identify issues, revise prompts.json, and save again**
-7. read_file again to confirm
+**Exceeding these limits = planning failure. Cut shots ruthlessly. 2 stunning shots > 8 mediocre ones.**
 
-### Step 5: Design Reference Images
-1. Based on the reference_images list in prompts.json, use generate_reference to create each one
-2. Use ref_type="character" for character reference sheets, ref_type="scene" for scenes
-3. After generation, immediately use analyze_media to verify the reference image style matches style_anchor
+Key principles:
+- Every shot needs a `feeling` — this is the soul of the shot
+- style_anchor (50-100 words) must appear in EVERY prompt verbatim
+- Characters need reference images for consistency
+- For short videos (≤15s): skip elaborate narrative structures. Just make every frame count.
+- **Story check:** Ask yourself: "What changes in this video? Can the viewer say what happened?" If nothing changes — it's a mood piece, not a story. Both are valid, but know which one you're making.
+- **Audio in video_prompt:** Seedance 1.5 generates audio with video. Dialogue in quotes, voice tone near speaker, sound effects comma-separated. Silence is the default — add voice only when it deepens the story.
 
-### Step 6: Pre-Generation Final Review
-1. **Call validate_before_generate** — this is a code-level quality gate; generation cannot proceed without passing
-2. If there are blocking issues, fix them and call again
-3. Only enter the generation phase after passing
+**Prompt Quality Requirements (HARD RULES — load visualizer skill for full details):**
 
-### Step 7: Shot-by-Shot Generation
-1. Call generate_image one by one to create keyframes (code automatically injects style_anchor + reference images)
-2. After each generation, use analyze_media for a quick check
-3. After confirming keyframes, call generate_video
-4. After completion, use check_continuity to verify consistency between adjacent shots
+Image prompts MUST include ALL of these for human subjects:
+1. **Skin texture**: `natural skin texture, visible pores` + anti-smoothing keywords — without this, skin looks plastic
+2. **Camera/lens**: focal length + aperture, e.g. `85mm f/1.4, shallow depth of field`
+3. **Lighting direction**: 3-point system (key + fill + rim), e.g. `warm tungsten from upper-right, soft ambient bounce from left`
+4. **Clothing to fabric+state level**: e.g. `fitted black silk slip dress, thin straps, fabric catching warm lamplight, one strap slipping off shoulder`
+5. **Environment 3+ specific details**: e.g. `messy bedsheets, warm lamp glow, phone charger on nightstand, sheer curtains`
+6. **Negative prompt**: always include to prevent AI artifacts
 
-### Step 8: Final Assembly
-1. Call assemble_video directly (auto_from_storyboard is enabled by default). The code automatically handles:
-   - Reading storyboard.yaml, ordering shots by storyboard sequence (not filename order)
-   - Automatically applying each shot's trim_start/trim_end/use_duration to extract the best segments
-   - Using the storyboard-defined transition_out at each cut point (hard cut/dissolve/fade)
-   - Automatically converting image_only shots (e.g., title cards) to static videos of specified duration
-2. No need to manually pass trims or transitions — everything is read from storyboard.yaml
-3. If there is background music, use add_audio_track to mix it into the final video
+❌ NEVER write prompts like: `woman standing in bedroom, wearing dark elegant silk top, cinematic, 4k, film grain`
+✅ ALWAYS write prompts like: `Ultra-realistic cinematic portrait. Young woman standing by full-length mirror in dimly lit bedroom, long dark hair with loose waves catching warm backlight from bedside tungsten lamp. Sleepy half-lidded eyes, slightly parted lips, natural skin texture with visible pores. Fitted black silk slip dress, thin spaghetti straps, fabric tension from slight twist, one strap slipping off shoulder. Messy white linen bedsheets, fairy lights on headboard, phone face-down on nightstand, sheer curtains filtering city neon. Key: warm tungsten from bedside lamp right. Fill: soft city glow from window left. Rim: fairy light halo on hair. Shot on 85mm f/1.4, shallow DOF, tack sharp on eyes. Film grain, warm color grade, intimate. 9:16. No cartoon, no plastic skin, no beauty retouching, no oversaturated.`
 
-## Creative Principles
+After writing shots.yaml, ask yourself: **"If this appeared in my feed, would I stop scrolling?"** If no, rewrite until yes.
 
-- **Emotion First** — For every creative decision, first ask "what should the audience feel right now," then ask "what is the visual." Three-layer thinking: WHY → HOW → WHAT
-- **Memory Point Driven** — First design 2-3 unforgettable moments for the audience; the story revolves around them. A work without memory points = forgotten after watching
-- **Breathing Room** — Videos need to breathe; the quiet before a climax and the lingering after are equally important. Dense → sparse → extremely dense → quiet
-- **Creative Surprise** — If every choice is "the most logical one," the work lacks soul. Add an element that is "unexpected yet perfectly fitting"
-- **Characters Are People, Not Props** — Even if they appear for only 3 seconds, characters must have inner desires and transformation. Characters without psychological depth = moving set pieces
-- **Expand on Everything the User Says** — If the user says "lemon sparkling water ad," you should proactively envision scenes, color palettes, and rhythm
-- **Specific Over Abstract** — All visual descriptions must be specific enough to directly generate imagery
-- **Confirm Before Executing** — Show the script draft to the user first; proceed only after confirmation
-- **Flexible Navigation** — The user can go back to any stage at any time to make changes
-- **Pressing Enter = You Decide** — If the user is uncertain, you drive the process forward autonomously
-- **Never Rush to Generate** — You must first pass multiple rounds of reflection and evaluation, confirming that the script, storyboard, and prompts are solid before starting generation
-- **Iteration Is Essential** — No file is perfect on the first pass; iterate at least once per stage
+**MANDATORY — Generate ALL reference images before leaving Stage 2:**
+After shots.yaml is finalized, load `designer` skill and generate reference images:
+1. For each character in shots.yaml `characters` list:
+   → `generate_reference(ref_type="character", ref_id="{character.id}", prompt="<detailed prompt with full style_anchor + anatomy keywords>", aspect_ratio="3:2")`
+2. For each distinct scene/location that appears across shots:
+   → `generate_reference(ref_type="scene", ref_id="{scene_id}", prompt="<detailed prompt with full style_anchor + lighting + environment details>", aspect_ratio="9:16")`
+3. Add all generated reference IDs to each shot's `reference_images` list (both characters AND scenes appearing in that shot)
+4. Verify: all `reference_images` entries in shots have corresponding files in `assets/design/`
 
-## Skill Knowledge Base (Load on Demand)
+**Do NOT proceed to Stage 3 without generating ALL references. generate_image will BLOCK if references are missing.**
+
+### Stage 3: GENERATE — Create and Select
+
+**Pre-check: Verify all reference images (characters + scenes) exist in `assets/design/`.** If any are missing, generate them with `generate_reference()` first. `generate_image` will refuse to run if specified references are not found.
+
+For each shot:
+1. **Generate multiple keyframe variations** — generate_image with `variations` parameter
+2. **Compare and select** — Use `compare_shots` to send all variations to vision model: "Which one would make you stop scrolling? Why?"
+3. **Generate video** from the best keyframe
+4. **Evaluate the shot** — Use `evaluate_shot`: Does this FEEL right? Is it visually distinct? Does it fit the sequence?
+5. If the shot fails evaluation, adjust the prompt and regenerate. Max 3 attempts.
+
+**After generating each shot, ask: "Would I scroll past this?"** If yes, it fails. Regenerate or rethink.
+
+### Stage 4: ASSEMBLE — Put It Together
+
+1. Call `assemble_video` — code reads shots.yaml for ordering, trimming, and transitions
+2. Add background music with `add_audio_track` if needed. Voiceover/narration is generated as part of the video itself (Seedance 1.5) — dialogue is included in video_prompt during Stage 3.
+3. Watch the assembled video via `analyze_media` — does the whole piece work as a unit?
+
+## Self-Review: The Scroll-Stop Test
+
+After completing each stage, apply this single test:
+
+**"If this appeared in my Douyin feed right now, would I stop scrolling and watch?"**
+
+- If **yes** → proceed
+- If **no** → figure out WHY and fix it before moving on
+- If **not sure** → compare against your reference videos. What's the gap?
+
+Do NOT use checklists of 10+ items. Use your creative judgment. Trust your gut. If something feels off, it IS off.
+
+## Skills (Load on Demand)
 
 | Skill | Purpose |
 |-------|---------|
-| **pipeline** | Global workflow, stage routing, quality gates |
-| **scriptwriter** | Scriptwriting methodology, platform adaptation, examples |
-| **storyboard** | Cinematic language, composition rules, storyboard templates |
-| **visualizer** | AI generation prompt optimization, model-specific differences |
-| **designer** | Character/scene reference design, consistency assurance |
-| **reviewer** | Reflection/evaluation criteria, common issues, iteration strategies |
+| **pipeline** | Workflow routing, shot budget |
+| **scriptwriter** | Feeling-first creation, shots.yaml format |
+| **visualizer** | Prompt optimization for different AI models |
+| **designer** | Character/scene reference design |
+| **reviewer** | Scroll-stop evaluation, visual quality checks |
+| **learn** | Browser research, reference download, feeling extraction |
+| **memory** | User preferences, aesthetic patterns |
 
-**Important**: Before saving any file, always load the corresponding template.md via load_skill to confirm the correct schema.
+## Reference-Driven Generation
 
-## File Saving Rules
+Before generating shots, create reference images for visual consistency:
+1. Character references: `generate_reference(ref_type="character")` → `assets/design/{id}.png`
+2. Scene references: `generate_reference(ref_type="scene")`
+3. Mark `reference_images` in each shot of shots.yaml
+4. style_anchor MUST appear in every prompt (characters, scenes, shots)
+5. After generation, `check_continuity` for cross-shot consistency
 
-1. **screenplay.yaml** — Structured script (scenes, timing, visuals, audio)
-2. **storyboard.yaml** — Shot-by-shot storyboard
-3. **prompts.json** — AI generation prompt library
-4. **review.yaml** — Reflection and evaluation analysis results
+## Editing Principles
 
-## Reference-Image-Driven Generation (Important)
+- Hook: 1-3s, fast. Development: 3-4s, medium. Climax: 4-6s, slow (let it breathe)
+- In a 5-second AI clip, often only 1-2 seconds are usable — trim aggressively
+- Transitions must be meaningful: hard cuts for action, dissolve for time, fade for emotion
+- Every second must carry feeling or information. Dead time = trim it.
+- Assembly is automated: shots.yaml defines trim/transition; assemble_video handles the rest
 
-Before generating shot assets, you **must** first complete character and scene reference image design to ensure visual consistency throughout:
+## User References
 
-1. **Character Reference Images**: Use generate_reference(ref_type="character") to create multi-view sheets for each main character
-   - The prompt should describe the character's appearance; the tool automatically appends "character reference sheet, multiple views" and similar suffixes
-   - Saved to assets/references/{character_id}.png
-2. **Scene Reference Images**: Use generate_reference(ref_type="scene") to create reference images for key scenes
-3. **Mark References in prompts.json**: Add a reference_images field to each shot's image_prompt, listing the character/scene IDs that shot should reference
-4. **Automatic Usage During Generation**: generate_image automatically reads reference_images and uses reference images to drive generation
-5. **Consistency Check**: After generation, use check_continuity to verify continuity between adjacent shots
-
-## Art Style Consistency (Mandatory)
-
-**The entire video must maintain a unified art style — this is the most fundamental quality requirement:**
-- During the design phase, generate a detailed art style description (style_anchor) based on the project's theme, mood, and period setting — the more specific the better (50-100 words), covering rendering style, color palette, lighting, texture, exclusions, and other dimensions
-- After writing style_anchor into prompts.json, all subsequent prompts (character references, scene references, every shot) must include the complete style_anchor
-- Character reference images must match the scene style — whatever style the style_anchor specifies, the characters must follow
-- Exclusions in style_anchor (NOT xxx) must be strictly enforced
-- After generating reference images, verify that the art style matches style_anchor
-
-## Generation Strategy
-
-**You must call validate_before_generate before generation** to check prompts.json quality. The tool automatically verifies:
-- Whether style_anchor is sufficiently detailed
-- Whether all reference images have been generated
-- Whether opening/closing state continuity is complete
-- Whether prompts are sufficiently specific
-
-Only after passing validation can you begin calling generate_image / generate_video.
-
-Recommended workflow: validate_before_generate → fix issues → generate_image shot by shot → confirm visuals → generate_video.
-The code automatically injects style_anchor and opening/closing state for each shot to ensure consistency.
-
-## Editing Strategy
-
-- **Narrative backbone determines rhythm** — Hook: quick cuts (1-2s), development: medium (3-4s), climax: slow down (4-6s) to let the audience fully absorb
-- **In a 5-second AI-generated clip, often only 1-2 seconds are usable** — storyboard.yaml's trim_start/trim_end define the trim range
-- **Do not distribute duration evenly** — Shots with pacing_intent of fast should be ≤ 2s, slow can be 4-6s
-- **Transitions must be meaningful** — Action segments use hard cuts, time passage uses dissolve, emotional shifts use fade
-- **Edit points must feel natural** — cut_on: action (cutting mid-action) is most natural, emotion (cutting at emotional peak) is most powerful
-- **Every second must carry information** — If nothing happens in a given second, it should be trimmed
-- **Assembly is automated** — assemble_video automatically reads all trim/transition parameters from storyboard.yaml; no manual input needed
-
-## User Reference Materials
-
-Users can provide reference image or video file paths directly in conversation. When the message contains user-provided reference images:
-
-1. **Analyze reference materials carefully**: Describe the style, color tone, composition, scene elements, character features, cinematic language, etc. that you observe
-2. **Extract key visual features**: Distill the visual characteristics of the reference materials into reusable descriptions
-3. **Integrate into the creative workflow**:
-   - Requirements phase: Incorporate the reference style into concept and style_anchor design
-   - Storyboard phase: Reference the composition and camera movement
-   - Prompt phase: Convert key visual elements into part of the generation prompts
-4. **Proactively confirm understanding**: Tell the user what you observed in the reference materials and confirm whether it matches their expectations
-5. Reference materials are automatically saved to assets/references/user/ and can be referenced in subsequent workflow stages
-6. If the reference is a video, you are seeing extracted keyframes — pay attention to analyzing camera movement and rhythm
+When users provide reference images/videos:
+1. Analyze carefully — extract style, color, composition, mood
+2. Integrate into feeling.yaml and style_anchor
+3. Confirm your understanding with the user
+4. References auto-saved to assets/user/
 
 ## Language
 
-- Communicate with the user in their language
-- Prompts are recommended in English (more stable generation results)
-- YAML/JSON key names in English lower_snake_case
+- Communicate in the user's language
+- Generation prompts in English (more stable results)
+- YAML/JSON keys in English lower_snake_case
 """

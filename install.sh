@@ -178,10 +178,10 @@ install_takone() {
         cd "$INSTALL_DIR"
     fi
 
-    # Install with pipx or fallback to venv
+    # Install with pipx (editable) or fallback to venv
     info "Installing Takone package..."
     if has pipx; then
-        pipx install "$INSTALL_DIR[all]" --force 2>/dev/null || {
+        pipx install -e "$INSTALL_DIR[all]" --force 2>/dev/null || {
             info "pipx failed, falling back to venv..."
             pip_install "$INSTALL_DIR"
         }
@@ -212,7 +212,7 @@ pip_install() {
     "$dir/.venv/bin/pip" install --upgrade "setuptools>=75.0" wheel --quiet
     # --no-build-isolation: use the venv's setuptools directly, avoids the
     # "Cannot import setuptools.backends._legacy" crash on Python 3.14
-    "$dir/.venv/bin/pip" install --no-build-isolation "$dir[all]" --quiet
+    "$dir/.venv/bin/pip" install --no-build-isolation -e "$dir[all]" --quiet
 
     # Create wrapper script
     local BIN_DIR="$HOME/.local/bin"

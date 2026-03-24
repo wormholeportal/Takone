@@ -32,6 +32,7 @@ class FFmpegAssembler:
             preset: x264 encoding preset. "slow" gives best quality/size ratio.
             fps: Output framerate. 30 ensures consistent playback across all clips.
         """
+        self._fps = fps
         # Mac QuickTime compatible encoding settings (instance-level for configurability)
         self._VIDEO_OPTS = [
             "-c:v", "libx264",
@@ -162,55 +163,120 @@ class FFmpegAssembler:
                 print(f"  stdout: {e.stdout.strip()}", file=sys.stderr)
             raise
 
+    def _normalize_clip(self, clip: Path, output: Path) -> Path:
+        """Re-encode a clip to the target fps to ensure consistent frame timing.
+
+        This prevents the concat demuxer bug where mixed-fps inputs cause
+        video stream duration to diverge from audio stream duration.
+        """
+        # Check if already at target fps
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate",
+                "-of", "csv=p=0",
+                str(clip),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            fps_str = result.stdout.strip()
+            if "/" in fps_str:
+                num, den = fps_str.split("/")
+                clip_fps = int(num) / int(den) if int(den) > 0 else 0
+            else:
+                clip_fps = float(fps_str)
+            if abs(clip_fps - self._fps) < 0.5:
+                return clip  # Already at target fps, no normalization needed
+        except Exception:
+            pass  # Can't determine fps, normalize to be safe
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            "ffmpeg",
+            *self._GLOBAL_OPTS,
+            "-i", str(clip),
+            *self._VIDEO_OPTS,
+        ]
+        if self._has_audio_stream(clip):
+            cmd.extend(self._AUDIO_OPTS)
+        else:
+            cmd.append("-an")
+        cmd.extend(self._CONTAINER_OPTS)
+        cmd.append(str(output))
+
+        self._run_ffmpeg(cmd, desc="normalize-fps")
+        return output
+
+    def _normalize_clips(self, clips: list[Path]) -> tuple[list[Path], list[Path]]:
+        """Normalize all clips to target fps. Returns (normalized_clips, temp_files_to_cleanup)."""
+        normalized = []
+        temps = []
+        for clip in clips:
+            norm_path = Path(tempfile.mktemp(suffix=".mp4"))
+            result = self._normalize_clip(clip, norm_path)
+            if result == clip:
+                # Clip was already at target fps, no temp file created
+                normalized.append(clip)
+                norm_path.unlink(missing_ok=True)
+            else:
+                normalized.append(norm_path)
+                temps.append(norm_path)
+        return normalized, temps
+
     def _concat_simple(self, clips: list[Path], output: Path) -> Path:
         """Simple concatenation using concat demuxer with re-encoding.
 
-        Handles mixed audio/no-audio clips by adding silent audio tracks
-        to clips that lack them before concatenation.
+        Normalizes all clips to the target fps first to prevent the mixed-fps
+        concat demuxer bug (where video/audio durations diverge).
+        Then handles mixed audio/no-audio clips by adding silent audio tracks.
         """
-        has_audio = any(self._has_audio_stream(c) for c in clips)
+        # Step 0: Normalize all clips to target fps to prevent mixed-fps bugs
+        norm_clips, norm_temps = self._normalize_clips(clips)
 
-        if not has_audio:
-            # No audio at all — simple concat
-            return self._concat_demuxer(clips, output, with_audio=False)
-
-        # Some or all clips have audio — ensure ALL clips have audio
-        # by adding silent audio to those missing it
-        patched_clips = []
-        temp_files = []
-        all_have_audio = all(self._has_audio_stream(c) for c in clips)
-
-        if all_have_audio:
-            # All clips have audio — direct demuxer concat
-            return self._concat_demuxer(clips, output, with_audio=True)
-
-        # Mixed case: patch clips without audio
         try:
-            for clip in clips:
-                if self._has_audio_stream(clip):
-                    patched_clips.append(clip)
-                else:
-                    # Add silent audio track to this clip
-                    patched = Path(tempfile.mktemp(suffix=".mp4"))
-                    dur = self._get_duration(clip)
-                    cmd = [
-                        "ffmpeg",
-                        *self._GLOBAL_OPTS,
-                        "-i", str(clip),
-                        "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={dur}",
-                        "-c:v", "copy",
-                        *self._AUDIO_OPTS,
-                        "-shortest",
-                        *self._CONTAINER_OPTS,
-                        str(patched),
-                    ]
-                    self._run_ffmpeg(cmd, desc="add-silent-audio")
-                    patched_clips.append(patched)
-                    temp_files.append(patched)
+            has_audio = any(self._has_audio_stream(c) for c in norm_clips)
 
-            return self._concat_demuxer(patched_clips, output, with_audio=True)
+            if not has_audio:
+                return self._concat_demuxer(norm_clips, output, with_audio=False)
+
+            all_have_audio = all(self._has_audio_stream(c) for c in norm_clips)
+            if all_have_audio:
+                return self._concat_demuxer(norm_clips, output, with_audio=True)
+
+            # Mixed case: patch clips without audio
+            patched_clips = []
+            patch_temps = []
+            try:
+                for clip in norm_clips:
+                    if self._has_audio_stream(clip):
+                        patched_clips.append(clip)
+                    else:
+                        patched = Path(tempfile.mktemp(suffix=".mp4"))
+                        dur = self._get_duration(clip)
+                        cmd = [
+                            "ffmpeg",
+                            *self._GLOBAL_OPTS,
+                            "-i", str(clip),
+                            "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={dur}",
+                            "-c:v", "copy",
+                            *self._AUDIO_OPTS,
+                            "-shortest",
+                            *self._CONTAINER_OPTS,
+                            str(patched),
+                        ]
+                        self._run_ffmpeg(cmd, desc="add-silent-audio")
+                        patched_clips.append(patched)
+                        patch_temps.append(patched)
+
+                return self._concat_demuxer(patched_clips, output, with_audio=True)
+            finally:
+                for f in patch_temps:
+                    try:
+                        f.unlink(missing_ok=True)
+                    except Exception:
+                        pass
         finally:
-            for f in temp_files:
+            for f in norm_temps:
                 try:
                     f.unlink(missing_ok=True)
                 except Exception:
@@ -256,13 +322,18 @@ class FFmpegAssembler:
         for clip in clips:
             inputs.extend(["-i", str(clip)])
 
-        # Build video xfade filter chain
+        # Normalize timebases for xfade compatibility
+        settb_parts = []
+        for i in range(len(clips)):
+            settb_parts.append(f"[{i}:v]settb=AVTB,fps={self._fps}[norm{i}]")
+
+        # Build video xfade filter chain using normalized streams
         v_parts = []
-        current_v = "[0:v]"
+        current_v = "[norm0]"
         clip_durations = [self._get_duration(c) for c in clips]
         running_duration = clip_durations[0]
         for i in range(1, len(clips)):
-            next_v = f"[{i}:v]"
+            next_v = f"[norm{i}]"
             out_v = f"[v{i}]" if i < len(clips) - 1 else "[outv]"
             offset = max(0, running_duration - duration)
             running_duration = running_duration + clip_durations[i] - duration
@@ -290,7 +361,7 @@ class FFmpegAssembler:
                 )
                 current_a = out_a
 
-            filter_complex = ";".join(v_parts + a_parts)
+            filter_complex = ";".join(settb_parts + v_parts + a_parts)
             cmd = [
                 "ffmpeg",
                 *self._GLOBAL_OPTS,
@@ -305,7 +376,7 @@ class FFmpegAssembler:
             ]
         else:
             # Video only
-            filter_complex = ";".join(v_parts)
+            filter_complex = ";".join(settb_parts + v_parts)
             cmd = [
                 "ffmpeg",
                 *self._GLOBAL_OPTS,
@@ -323,7 +394,7 @@ class FFmpegAssembler:
         except subprocess.CalledProcessError:
             # Fallback: video-only if audio filter fails
             print("  [FFmpeg] Audio crossfade failed, falling back to video-only", file=sys.stderr)
-            filter_complex = ";".join(v_parts)
+            filter_complex = ";".join(settb_parts + v_parts)
             cmd_fallback = [
                 "ffmpeg",
                 *self._GLOBAL_OPTS,
@@ -740,13 +811,19 @@ class FFmpegAssembler:
 
         clip_durations = [self._get_duration(c) for c in clips]
 
-        # Build video xfade chain
+        # Normalize timebases to avoid xfade mismatch errors
+        # (e.g. 1/15360 vs 1/12288 from different source encoders)
+        settb_parts = []
+        for i in range(len(clips)):
+            settb_parts.append(f"[{i}:v]settb=AVTB,fps={self._fps}[norm{i}]")
+
+        # Build video xfade chain using normalized streams
         v_parts = []
-        current_v = "[0:v]"
+        current_v = "[norm0]"
         running_duration = clip_durations[0]
 
         for i in range(len(clips) - 1):
-            next_v = f"[{i + 1}:v]"
+            next_v = f"[norm{i + 1}]"
             is_last = (i == len(clips) - 2)
             out_v = "[outv]" if is_last else f"[v{i + 1}]"
 
@@ -761,7 +838,7 @@ class FFmpegAssembler:
             current_v = out_v
 
         has_audio = any(self._has_audio_stream(c) for c in clips)
-        filter_complex = ";".join(v_parts)
+        filter_complex = ";".join(settb_parts + v_parts)
 
         if has_audio:
             a_parts = []
@@ -776,7 +853,7 @@ class FFmpegAssembler:
                 )
                 current_a = out_a
 
-            filter_complex = ";".join(v_parts + a_parts)
+            filter_complex = ";".join(settb_parts + v_parts + a_parts)
             cmd = [
                 "ffmpeg",
                 *self._GLOBAL_OPTS,
@@ -830,15 +907,62 @@ class FFmpegAssembler:
 
     @staticmethod
     def _get_duration(video: Path) -> float:
-        """Get video duration in seconds using ffprobe."""
-        cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "csv=p=0",
-            str(video),
-        ]
+        """Get video duration in seconds using ffprobe.
+
+        Uses the VIDEO STREAM duration (not container/format duration) to avoid
+        mismatches when audio is longer than video (e.g. after mixed-fps concat).
+        Falls back to format duration, then to 5.0s default.
+        """
+        # First try: video stream duration (most accurate for xfade offset calculation)
         try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=duration,nb_frames,r_frame_rate",
+                "-of", "csv=p=0",
+                str(video),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            parts = result.stdout.strip().split(",")
+            # parts: r_frame_rate, duration, nb_frames (order varies, parse by type)
+            stream_dur = None
+            nb_frames = None
+            fps_num, fps_den = None, None
+
+            for part in parts:
+                part = part.strip()
+                if "/" in part:
+                    nums = part.split("/")
+                    if len(nums) == 2 and all(n.isdigit() for n in nums) and int(nums[1]) > 0:
+                        fps_num, fps_den = int(nums[0]), int(nums[1])
+                elif "." in part:
+                    try:
+                        stream_dur = float(part)
+                    except ValueError:
+                        pass
+                elif part.isdigit():
+                    nb_frames = int(part)
+
+            # Prefer nb_frames / fps (exact frame count → exact duration)
+            if nb_frames and fps_num and fps_den and fps_den > 0:
+                fps = fps_num / fps_den
+                if fps > 0:
+                    return nb_frames / fps
+
+            # Fallback: stream duration
+            if stream_dur and stream_dur > 0:
+                return stream_dur
+        except Exception:
+            pass
+
+        # Last resort: format/container duration
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "csv=p=0",
+                str(video),
+            ]
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             return float(result.stdout.strip())
         except Exception:
