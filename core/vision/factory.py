@@ -37,7 +37,7 @@ def create_vision(config):
             model=vision_cfg.qwen_model,
         )
     elif vision_cfg.provider in ("openai", "gpt4o"):
-        from .gpt4o import GPT4oVision
+        from .openai import GPT4oVision
         return GPT4oVision(
             api_key=llm_cfg.openai_api_key,
             model=llm_cfg.openai_model,

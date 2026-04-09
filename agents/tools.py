@@ -530,6 +530,19 @@ TOOLS_ANTHROPIC = [
                         "Wrong ratio causes figure distortion!"
                     ),
                 },
+                "reference_images": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional list of reference image IDs from assets/learn/ to use as style references "
+                        "via image-to-image generation. Pick the best learn images that capture the target "
+                        "visual style (color palette, lighting, texture, mood). These are the ACTUAL images "
+                        "downloaded during the learn phase — using them preserves visual details that text "
+                        "descriptions cannot capture. Examples: ['learn/image/ref_01.png', 'learn/image/style_sample.jpg']. "
+                        "Also supports design/ and user/ paths. When provided, generation uses img2img "
+                        "instead of text-only, producing results that inherit the visual DNA of the references."
+                    ),
+                },
             },
             "required": ["ref_type", "ref_id", "prompt", "aspect_ratio"],
         },
@@ -539,7 +552,7 @@ TOOLS_ANTHROPIC = [
         "description": (
             "Generate key frame image(s) for a specific shot using Seedream. "
             "Saved to assets/image/. Use 'variations' to generate multiple versions "
-            "for comparison (recommended: 3-5 for short videos). "
+            "for comparison (default: 2, user can request more or fewer). "
             "Automatically loads reference_images and style_anchor from shots.yaml/prompts.json."
         ),
         "input_schema": {
@@ -560,9 +573,10 @@ TOOLS_ANTHROPIC = [
                 },
                 "variations": {
                     "type": "integer",
-                    "description": "Number of variations to generate for comparison (default: 1, recommended: 3-5 for important shots)",
+                    "description": "Number of variations to generate for comparison (default: 2)",
                     "minimum": 1,
                     "maximum": 5,
+                    "default": 2,
                 },
             },
             "required": ["shot_id"],
@@ -1119,13 +1133,28 @@ shots:
 
 **Exceeding these limits = planning failure. Cut shots ruthlessly. 2 stunning shots > 8 mediocre ones.**
 
+**Duration Planning (CRITICAL — avoid waste):**
+
+Seedance 2: **4–15s** (any integer). Seedance 1.x: **5s** or **10s** only. Plan each shot's `duration` accordingly.
+
+Rules for duration planning:
+1. **Prefer 5s shots** — most shots only need 3-5s of effective content.
+2. **Use precise durations** — don't pad unnecessarily.
+3. **Merge short adjacent shots** — two shots of 2s+3s should be ONE 5s shot.
+4. **Sum check** — before finalizing, add up all shot durations. Compare against target duration. If total generated duration is >1.5× target, you have too many shots or durations are too large. Consolidate.
+5. **Audio completeness** — Seedance generates audio WITH video. All dialogue, narration, and sound effects in `video_prompt` MUST complete within the shot's duration. A 5s shot cannot contain a 7s sentence. If dialogue is long, either split it across shots at natural pauses, or use a longer duration.
+
+Example: Target 30s video
+- ❌ Bad: 6 shots × duration:6 → generates 6×10s = 60s (2× waste)
+- ✅ Good: 5 shots × duration:5 + 1 shot × duration:5 = 6×5s = 30s generated for 30s target
+
 Key principles:
 - Every shot needs a `feeling` — this is the soul of the shot
 - style_anchor (50-100 words) must appear in EVERY prompt verbatim
 - Characters need reference images for consistency
 - For short videos (≤15s): skip elaborate narrative structures. Just make every frame count.
 - **Story check:** Ask yourself: "What changes in this video? Can the viewer say what happened?" If nothing changes — it's a mood piece, not a story. Both are valid, but know which one you're making.
-- **Audio in video_prompt:** Seedance 1.5 generates audio with video. Dialogue in quotes, voice tone near speaker, sound effects comma-separated. Silence is the default — add voice only when it deepens the story.
+- **Audio in video_prompt:** Seedance 1.5 generates audio with video. Dialogue in quotes, voice tone near speaker, sound effects comma-separated. Silence is the default — add voice only when it deepens the story. ALL audio must fit within the shot's duration — do not write dialogue that takes longer to speak than the shot lasts.
 
 **Prompt Quality Requirements (HARD RULES — load visualizer skill for full details):**
 
@@ -1144,12 +1173,13 @@ After writing shots.yaml, ask yourself: **"If this appeared in my feed, would I 
 
 **MANDATORY — Generate ALL reference images before leaving Stage 2:**
 After shots.yaml is finalized, load `designer` skill and generate reference images:
-1. For each character in shots.yaml `characters` list:
-   → `generate_reference(ref_type="character", ref_id="{character.id}", prompt="<detailed prompt with full style_anchor + anatomy keywords>", aspect_ratio="3:2")`
-2. For each distinct scene/location that appears across shots:
-   → `generate_reference(ref_type="scene", ref_id="{scene_id}", prompt="<detailed prompt with full style_anchor + lighting + environment details>", aspect_ratio="9:16")`
-3. Add all generated reference IDs to each shot's `reference_images` list (both characters AND scenes appearing in that shot)
-4. Verify: all `reference_images` entries in shots have corresponding files in `assets/design/`
+1. **Select best learn images as style references** — Review images in `assets/learn/image/` and their `.analysis.md` files. Pick 1-3 images that best capture the target visual style (color, lighting, texture, mood). These will be passed as `reference_images` to generate_reference for img2img generation, preserving visual DNA that text alone cannot capture.
+2. For each character in shots.yaml `characters` list:
+   → `generate_reference(ref_type="character", ref_id="{character.id}", prompt="<detailed prompt with full style_anchor + anatomy keywords>", aspect_ratio="3:2", reference_images=["learn/image/best_ref.png"])`
+3. For each distinct scene/location that appears across shots:
+   → `generate_reference(ref_type="scene", ref_id="{scene_id}", prompt="<detailed prompt with full style_anchor + lighting + environment details>", aspect_ratio="9:16", reference_images=["learn/image/best_ref.png"])`
+4. Add all generated reference IDs to each shot's `reference_images` list (both characters AND scenes appearing in that shot)
+5. Verify: all `reference_images` entries in shots have corresponding files in `assets/design/`
 
 **Do NOT proceed to Stage 3 without generating ALL references. generate_image will BLOCK if references are missing.**
 
@@ -1158,7 +1188,7 @@ After shots.yaml is finalized, load `designer` skill and generate reference imag
 **Pre-check: Verify all reference images (characters + scenes) exist in `assets/design/`.** If any are missing, generate them with `generate_reference()` first. `generate_image` will refuse to run if specified references are not found.
 
 For each shot:
-1. **Generate multiple keyframe variations** — generate_image with `variations` parameter
+1. **Generate keyframe variations** — generate_image (default 2 variations, user can request more or fewer)
 2. **Compare and select** — Use `compare_shots` to send all variations to vision model: "Which one would make you stop scrolling? Why?"
 3. **Generate video** from the best keyframe
 4. **Evaluate the shot** — Use `evaluate_shot`: Does this FEEL right? Is it visually distinct? Does it fit the sequence?

@@ -20,6 +20,7 @@ Limits: input refs + output images <= 15; single image <= 10MB
 
 import asyncio
 import base64
+import time
 from pathlib import Path
 
 from .base import BaseImageGen, GeneratedImage
@@ -27,6 +28,10 @@ from .base import BaseImageGen, GeneratedImage
 
 # Input refs + output images total limit
 MAX_TOTAL_IMAGES = 15
+
+# Retry config for 429 (engine overloaded)
+_MAX_RETRIES = 3
+_RETRY_DELAYS = [5, 10, 20]  # seconds
 
 
 class JimengImageGen(BaseImageGen):
@@ -40,7 +45,9 @@ class JimengImageGen(BaseImageGen):
     ):
         self.api_key = api_key
         self.model = model
-        self.base_url = base_url
+        # OpenAI SDK appends /images/generations automatically;
+        # strip it from base_url to avoid path duplication.
+        self.base_url = base_url.rstrip("/").removesuffix("/images/generations")
         self.default_image_size = default_image_size
         self.output_format = output_format
 
@@ -135,18 +142,28 @@ class JimengImageGen(BaseImageGen):
     async def _generate_single(
         self, prompt: str, size: str, extra: dict
     ) -> list[GeneratedImage]:
-        """Non-streaming single image generation."""
+        """Non-streaming single image generation with 429 retry."""
         loop = asyncio.get_event_loop()
         client = self._get_client()
 
         def _call():
-            return client.images.generate(
-                model=self.model,
-                prompt=prompt,
-                size=size,
-                response_format="b64_json",
-                extra_body=extra,
-            )
+            from openai import RateLimitError
+            for attempt in range(_MAX_RETRIES):
+                try:
+                    return client.images.generate(
+                        model=self.model,
+                        prompt=prompt,
+                        size=size,
+                        response_format="b64_json",
+                        extra_body=extra,
+                    )
+                except RateLimitError:
+                    if attempt < _MAX_RETRIES - 1:
+                        delay = _RETRY_DELAYS[attempt]
+                        print(f"[Jimeng] Engine overloaded, retrying in {delay}s... ({attempt + 1}/{_MAX_RETRIES})")
+                        time.sleep(delay)
+                    else:
+                        raise
 
         response = await loop.run_in_executor(None, _call)
         return self._parse_response(response, prompt)
@@ -154,19 +171,29 @@ class JimengImageGen(BaseImageGen):
     async def _generate_streaming(
         self, prompt: str, size: str, extra: dict
     ) -> list[GeneratedImage]:
-        """Streaming multi-image generation."""
+        """Streaming multi-image generation with 429 retry."""
         loop = asyncio.get_event_loop()
         client = self._get_client()
 
         def _call():
-            return client.images.generate(
-                model=self.model,
-                prompt=prompt,
-                size=size,
-                response_format="b64_json",
-                stream=True,
-                extra_body=extra,
-            )
+            from openai import RateLimitError
+            for attempt in range(_MAX_RETRIES):
+                try:
+                    return client.images.generate(
+                        model=self.model,
+                        prompt=prompt,
+                        size=size,
+                        response_format="b64_json",
+                        stream=True,
+                        extra_body=extra,
+                    )
+                except RateLimitError:
+                    if attempt < _MAX_RETRIES - 1:
+                        delay = _RETRY_DELAYS[attempt]
+                        print(f"[Jimeng] Engine overloaded, retrying in {delay}s... ({attempt + 1}/{_MAX_RETRIES})")
+                        time.sleep(delay)
+                    else:
+                        raise
 
         stream = await loop.run_in_executor(None, _call)
         return await self._collect_stream(stream, prompt, loop)

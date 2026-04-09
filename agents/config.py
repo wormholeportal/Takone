@@ -109,9 +109,10 @@ class VideoGenConfig:
     provider: str = "seedance"  # "seedance" | "minimax" | "sora"
     seedance_api_key: str = ""  # Falls back to jimeng_api_key
     seedance_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
-    seedance_model: str = "doubao-seedance-1-5-pro-251215"  # 1.5 pro with audio support
+    seedance_model: str = "doubao-seedance-1-5-pro-251215"
     seedance_resolution: str = "720p"  # "720p" or "1080p"
     seedance_generate_audio: bool = True  # Generate video with synchronized audio
+    seedance_web_search: bool = False   # Enable web search for text-to-video
     minimax_api_key: str = ""
     minimax_model: str = "video-01"
     sora_model: str = "sora"
@@ -211,6 +212,10 @@ def load_config() -> DirectorConfig:
     cfg.image.jimeng_api_key = os.getenv("JIMENG_API_KEY", cfg.image.jimeng_api_key)
     cfg.image.gemini_api_key = os.getenv("GEMINI_API_KEY", cfg.image.gemini_api_key)
     cfg.video.minimax_api_key = os.getenv("MINIMAX_VIDEO_API_KEY", cfg.video.minimax_api_key)
+    cfg.video.seedance_base_url = os.getenv("SEEDANCE_BASE_URL", cfg.video.seedance_base_url)
+    cfg.video.seedance_model = os.getenv("SEEDANCE_MODEL", cfg.video.seedance_model)
+    cfg.image.jimeng_base_url = os.getenv("JIMENG_BASE_URL", cfg.image.jimeng_base_url)
+    cfg.image.jimeng_model = os.getenv("JIMENG_MODEL", cfg.image.jimeng_model)
 
     # ARK_API_KEY is shared across Jimeng image + Seedance video
     ark_key = cfg.llm.ark_api_key

@@ -29,6 +29,16 @@ Create short videos that make people stop scrolling. Four stages, feeling-first.
 
 **Exceeding these limits = planning failure.** Cut ruthlessly. 2 stunning shots are infinitely better than 8 mediocre ones. If your shot count exceeds the limit, combine or remove shots until it fits.
 
+**Duration Planning (avoid waste):**
+
+Seedance 2: **4–15s** (any integer). Seedance 1.x: **5s** or **10s** only.
+
+1. **Prefer 5s** — most shots need 3-5s effective content
+2. **Use precise durations** — don't pad unnecessarily
+3. **Merge short shots** — 2s+3s = one 5s shot. Don't generate two clips when one suffices
+4. **Sum check** — total generated duration should be ≤1.3× target duration
+5. **Audio must fit** — Seedance generates audio with video. Dialogue/narration in video_prompt must complete within the shot duration. Long sentences → split at natural pauses or use longer duration
+
 ## Routing Rules
 
 Determine where to start based on user intent:
@@ -123,12 +133,15 @@ If two adjacent shots have no shift — merge them or cut one.
 
 After shots.yaml is finalized:
 1. Load `designer` skill
-2. For each character in `characters` list → `generate_reference(ref_type="character", ref_id="{id}", prompt="...", aspect_ratio="3:2")`
+2. **Select best learn images** — Review `assets/learn/image/` and `.analysis.md` files. Pick 1-3 images that best capture the target visual style. These become style references for img2img generation.
+3. For each character in `characters` list → `generate_reference(ref_type="character", ref_id="{id}", prompt="...", aspect_ratio="3:2", reference_images=["learn/image/best_ref.png"])`
    - Prompt must include: full style_anchor, anatomy keywords, detailed physical description, clothing, view specification
-3. For each distinct scene/location → `generate_reference(ref_type="scene", ref_id="{scene_id}", prompt="...", aspect_ratio="9:16")`
+   - `reference_images`: the best learn images for visual style transfer
+4. For each distinct scene/location → `generate_reference(ref_type="scene", ref_id="{scene_id}", prompt="...", aspect_ratio="9:16", reference_images=["learn/image/best_ref.png"])`
    - Prompt must include: full style_anchor, lighting, color tone, time of day, environment details
-4. Add all generated reference IDs to each shot's `reference_images` (both characters AND scenes in that shot)
-5. Verify all `reference_images` entries have corresponding files in `assets/design/`
+   - `reference_images`: learn images with matching mood/lighting/color
+5. Add all generated reference IDs to each shot's `reference_images` (both characters AND scenes in that shot)
+6. Verify all `reference_images` entries have corresponding files in `assets/design/`
 
 **Do NOT proceed to Stage 3 without ALL references. `generate_image` will BLOCK if references are missing.**
 

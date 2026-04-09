@@ -6,21 +6,23 @@ Endpoints:
   POST /api/v3/contents/generations/tasks   — create task
   GET  /api/v3/contents/generations/tasks/{id} — poll status
 
-Models:
-  doubao-seedance-1-0-lite-250428   (lite, fast)
-  doubao-seedance-1-0-pro-250428    (standard, higher quality)
-  doubao-seedance-1-0-pro-fast-250528 (pro fast)
-  doubao-seedance-1-5-pro-251215    (1.5 pro, supports audio — DEFAULT)
-
 Auth: ARK_API_KEY as Bearer token.
 
 Task status values: queued → running → succeeded / failed / expired / cancelled
 Video URLs expire after 24 hours.
+
+Capabilities:
+  - Text-to-video, image-to-video
+  - Multimodal references: reference_image, reference_video, reference_audio in content
+  - Video editing: text + reference_image + reference_video → edited video
+  - Video extending: text + multiple reference_video → extended/spliced video
+  - Web search (text-to-video only): tools=[{"type": "web_search"}]
 """
 
 import asyncio
 import base64
 from pathlib import Path
+from typing import List, Optional
 
 import httpx
 
@@ -35,12 +37,14 @@ class SeedanceVideoGen(BaseVideoGen):
         base_url: str = "https://ark.cn-beijing.volces.com/api/v3",
         resolution: str = "720p",
         generate_audio: bool = True,
+        web_search: bool = False,
     ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.resolution = resolution
         self.generate_audio = generate_audio
+        self.web_search = web_search
 
     def _headers(self) -> dict:
         return {
@@ -73,10 +77,12 @@ class SeedanceVideoGen(BaseVideoGen):
                 {"type": "text", "text": prompt},
             ],
             "ratio": aspect_ratio,
-            "duration": self._resolve_duration(duration_seconds),
+            "duration": self._resolve_duration(duration_seconds, self.model),
             "resolution": self.resolution,
             "generate_audio": self.generate_audio,
         }
+        if self.web_search:
+            payload["tools"] = [{"type": "web_search"}]
 
         loop = asyncio.get_event_loop()
 
@@ -126,7 +132,7 @@ class SeedanceVideoGen(BaseVideoGen):
                 },
             ],
             "ratio": "adaptive",  # use adaptive for image-to-video
-            "duration": self._resolve_duration(duration_seconds),
+            "duration": self._resolve_duration(duration_seconds, self.model),
             "resolution": self.resolution,
             "generate_audio": self.generate_audio,
         }
@@ -208,6 +214,86 @@ class SeedanceVideoGen(BaseVideoGen):
 
         return task
 
+    async def multimodal_to_video(
+        self,
+        prompt: str,
+        ref_image_urls: Optional[List[str]] = None,
+        ref_video_urls: Optional[List[str]] = None,
+        ref_audio_url: Optional[str] = None,
+        duration_seconds: float = 5.0,
+        aspect_ratio: str = "16:9",
+    ) -> VideoTask:
+        """Generate video with multimodal references (images, videos, audio).
+
+        Supports three use cases depending on which refs are provided:
+          - Multimodal creative: text + ref images + ref video + ref audio
+          - Video editing:       text + ref image + ref video (replace objects)
+          - Video extending:     text + multiple ref videos (splice/extend)
+
+        Args:
+            ref_image_urls: URLs of reference images (role: reference_image)
+            ref_video_urls: URLs of reference videos (role: reference_video)
+            ref_audio_url:  URL of reference audio   (role: reference_audio)
+        """
+        if not self.api_key:
+            raise RuntimeError("No Seedance/Ark API key configured")
+
+        content: list = [{"type": "text", "text": prompt}]
+
+        for url in (ref_image_urls or []):
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": url},
+                "role": "reference_image",
+            })
+
+        for url in (ref_video_urls or []):
+            content.append({
+                "type": "video_url",
+                "video_url": {"url": url},
+                "role": "reference_video",
+            })
+
+        if ref_audio_url:
+            content.append({
+                "type": "audio_url",
+                "audio_url": {"url": ref_audio_url},
+                "role": "reference_audio",
+            })
+
+        payload = {
+            "model": self.model,
+            "content": content,
+            "ratio": aspect_ratio,
+            "duration": self._resolve_duration(duration_seconds, self.model),
+            "generate_audio": self.generate_audio,
+        }
+        if self.resolution:
+            payload["resolution"] = self.resolution
+
+        loop = asyncio.get_event_loop()
+
+        def _create():
+            with self._http_client() as client:
+                resp = client.post("/contents/generations/tasks", json=payload)
+                resp.raise_for_status()
+                return resp.json()
+
+        data = await loop.run_in_executor(None, _create)
+        task_id = data.get("id", "")
+        mode = "multimodal"
+        if ref_video_urls and ref_image_urls:
+            mode = "edit"
+        elif ref_video_urls and len(ref_video_urls) > 1:
+            mode = "extend"
+        print(f"[Seedance] Task created ({mode}): {task_id}")
+
+        return VideoTask(
+            task_id=task_id,
+            provider="seedance",
+            status="processing",
+        )
+
     async def _download_video(self, url: str) -> bytes:
         """Download video from URL (URLs expire after 24h)."""
         loop = asyncio.get_event_loop()
@@ -221,10 +307,15 @@ class SeedanceVideoGen(BaseVideoGen):
         return await loop.run_in_executor(None, _dl)
 
     @staticmethod
-    def _resolve_duration(seconds: float) -> int:
-        """Convert seconds to Seedance duration parameter (integer)."""
-        if seconds <= 5:
-            return 5
-        elif seconds <= 10:
+    def _resolve_duration(seconds: float, model: str = "") -> int:
+        """Convert requested seconds to an API-accepted duration value.
+
+        Newer models support any integer in [4, 15].
+        Older models only support 5 or 10.
+        """
+        if "seedance-2" in model:
+            return max(4, min(15, int(round(seconds))))
+        else:
+            if seconds <= 5:
+                return 5
             return 10
-        return 5

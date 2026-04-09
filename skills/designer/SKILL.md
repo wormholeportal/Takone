@@ -46,9 +46,10 @@ Roger Deakins inspired cinematography, NOT cartoon, NOT 3D render, NOT anime
 ### Style Generation Workflow
 
 1. **Study References First** — Look at your feeling.yaml references and downloaded images in assets/learn/. Use `analyze_media` on them to extract visual vocabulary (color palette, lighting style, texture quality).
-2. **Derive style_anchor from references** — Don't invent from scratch. Base your style_anchor on what you actually SEE in the reference images. If the references have muted teal tones with film grain, say that specifically.
-3. **Write to shots.yaml / prompts.json** — Save the style_anchor
-4. **Apply Globally** — All subsequent character references, scene references, and every shot's prompt must include the style_anchor
+2. **Select best learn images as style references** — From `assets/learn/image/`, pick 1-3 images that best represent the target visual style. These will be used as `reference_images` in generate_reference calls, enabling img2img generation that inherits the actual visual DNA (colors, textures, lighting, mood) from your research. Text descriptions alone lose too much visual information — the actual images are irreplaceable as style anchors.
+3. **Derive style_anchor from references** — Don't invent from scratch. Base your style_anchor on what you actually SEE in the reference images. If the references have muted teal tones with film grain, say that specifically.
+4. **Write to shots.yaml / prompts.json** — Save the style_anchor and the selected learn image paths
+5. **Apply Globally** — All subsequent character references, scene references, and every shot's prompt must include the style_anchor
 
 ### Style Consistency Rules
 
@@ -188,13 +189,16 @@ You can also use relative paths: `"reference_images": ["merchant", "learn/style_
 ## Workflow
 
 1. **Study references and generate style_anchor** — Read feeling.yaml and analyze reference images. Derive a 50-100 word style_anchor from what you actually see in the references, covering render style, color, lighting, texture, and exclusions. Write to shots.yaml / prompts.json.
-2. **Analyze characters and scenes** — Read shots.yaml, identify all characters and key scenes that appear
-3. **Generate character references** — For each character, call `generate_reference(ref_type="character", ref_id="xxx", prompt="...")`
+2. **Select best learn images for style transfer** — Review all images in `assets/learn/image/` and their `.analysis.md` sidecar files. Pick 1-3 images that best capture the target visual style (color palette, lighting quality, texture, mood). These will be passed as `reference_images` to generate_reference, enabling img2img generation that preserves visual details text cannot capture.
+3. **Analyze characters and scenes** — Read shots.yaml, identify all characters and key scenes that appear
+4. **Generate character references** — For each character, call `generate_reference(ref_type="character", ref_id="xxx", prompt="...", reference_images=["learn/image/best_ref.png", ...])`
    - The prompt must include the complete style_anchor
    - The prompt must be specific enough: include body type, proportions, clothing materials, colors, expressions, and other details
    - Exclusion items (NOT xxx) from the style_anchor must also be reflected in the character prompt
-4. **Generate scene references** — For key scenes, call `generate_reference(ref_type="scene", ref_id="xxx", prompt="...")`
-5. **Review and evaluate references** — Confirm all reference images strictly maintain consistent art style matching the style_anchor
-6. Add reference_images to each shot's image_prompt in prompts.json
-7. Generate keyframes with generate_image (automatically uses reference images + style_anchor)
-8. Use check_continuity to verify consistency between adjacent shots
+   - `reference_images`: pass the best learn images so the generated character inherits the real visual style
+5. **Generate scene references** — For key scenes, call `generate_reference(ref_type="scene", ref_id="xxx", prompt="...", reference_images=["learn/image/mood_ref.png", ...])`
+   - Pass learn images with matching mood, lighting, or color palette as style references
+6. **Review and evaluate references** — Confirm all reference images strictly maintain consistent art style matching the style_anchor
+7. Add reference_images to each shot's image_prompt in prompts.json
+8. Generate keyframes with generate_image (automatically uses reference images + style_anchor)
+9. Use check_continuity to verify consistency between adjacent shots

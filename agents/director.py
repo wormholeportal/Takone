@@ -444,6 +444,7 @@ class VideoDirector:
         ref_id = args["ref_id"]
         prompt = args["prompt"]
         aspect_ratio = args.get("aspect_ratio")
+        reference_image_ids = args.get("reference_images", [])
 
         if not self.project_dir:
             return "Error: project directory not initialized"
@@ -463,6 +464,20 @@ class VideoDirector:
         # Auto-appending caused prompt conflicts (e.g. "cinematic" + "white background")
         # and unnatural results. Trust the LLM's prompt.
 
+        # Resolve reference images from learn/design/user assets
+        ref_paths = []
+        if reference_image_ids:
+            missing_refs = []
+            for rid in reference_image_ids:
+                ref_path = self._resolve_reference_image(rid)
+                if ref_path:
+                    ref_paths.append(ref_path)
+                    print(f"{Colors.DIM}  [Style ref] {ref_path.name}{Colors.ENDC}")
+                else:
+                    missing_refs.append(rid)
+            if missing_refs:
+                print(f"{Colors.YELLOW}  ⚠ Some style references not found: {missing_refs} (continuing without them){Colors.ENDC}")
+
         # Create image generator
         if not self._image_gen:
             from core.image.factory import create_image_gen
@@ -474,17 +489,27 @@ class VideoDirector:
             refs_dir.mkdir(parents=True, exist_ok=True)
             save_path = refs_dir / f"{ref_id}.png"
 
-            print(f"{Colors.CYAN}  [Generating reference] {ref_type}/{ref_id}...{Colors.ENDC}")
-            images = asyncio.run(self._image_gen.text_to_image(
-                prompt=prompt,
-                aspect_ratio=aspect_ratio,
-            ))
+            if ref_paths:
+                ref_names = [p.stem for p in ref_paths]
+                print(f"{Colors.CYAN}  [Generating reference] {ref_type}/{ref_id} (style refs: {', '.join(ref_names)})...{Colors.ENDC}")
+                images = asyncio.run(self._image_gen.image_to_image(
+                    prompt=prompt,
+                    reference_images=ref_paths,
+                    aspect_ratio=aspect_ratio,
+                ))
+            else:
+                print(f"{Colors.CYAN}  [Generating reference] {ref_type}/{ref_id}...{Colors.ENDC}")
+                images = asyncio.run(self._image_gen.text_to_image(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                ))
 
             if images:
                 images[0].save(save_path)
                 self.generated_assets.append(str(save_path))
-                print(f"{Colors.GREEN}  ✓ Reference image generated: {ref_id}.png{Colors.ENDC}")
-                return f"Reference image saved: assets/design/{ref_id}.png"
+                ref_info = f" (with {len(ref_paths)} style references)" if ref_paths else ""
+                print(f"{Colors.GREEN}  ✓ Reference image generated: {ref_id}.png{ref_info}{Colors.ENDC}")
+                return f"Reference image saved: assets/design/{ref_id}.png{ref_info}"
             return f"Reference generation returned no results for {ref_id}"
 
         except Exception as e:
@@ -577,7 +602,7 @@ class VideoDirector:
         shot_id = args["shot_id"]
         prompt = args.get("prompt", "")
         aspect_ratio = args.get("aspect_ratio", self.config.project.default_aspect_ratio)
-        variations = args.get("variations", 1)
+        variations = args.get("variations", 2)
 
         # If no prompt provided, try reading from shots.yaml first, then prompts.json
         prompts_data = None
@@ -1151,85 +1176,28 @@ class VideoDirector:
             story_context = "Not provided — judge based on visual narrative."
 
         try:
-            import base64 as b64mod
-            import httpx
-            from openai import OpenAI
-
             print(f"{Colors.CYAN}  [Murch evaluation] {shot_id} ({media_type})...{Colors.ENDC}")
 
-            # Use Doubao Seed 2.0 Lite via Ark Responses API (native multimodal: text + image + video)
-            ark_api_key = self.config.llm.ark_api_key or os.environ.get("ARK_API_KEY", "")
-            ark_base_url = self.config.llm.ark_base_url or "https://ark.cn-beijing.volces.com/api/v3"
-            eval_model = "doubao-seed-2-0-lite-260215"
+            # Use the shared vision model (Chat Completions API, compatible with Ark)
+            if not self._vision:
+                from core.vision.factory import create_vision
+                self._vision = create_vision(self.config)
 
-            if not ark_api_key:
-                return "Error: ARK_API_KEY not configured. Required for Murch evaluation."
-
-            client = OpenAI(
-                api_key=ark_api_key,
-                base_url=ark_base_url,
-                http_client=httpx.Client(proxy=None, trust_env=False),
-            )
-
-            # Build multimodal content array for Responses API
-            # Content types: input_text, input_image (base64 data URL), input_video (file_id)
-            content = []
-
-            # Add context shot keyframes (always images for efficiency)
+            # Build context description from previous shots
             context_description_parts = []
+            context_images = []
             for ctx_id in context_shot_ids:
                 ctx_img = self.project_dir / "assets" / "image" / f"{ctx_id.lower()}.png"
                 if ctx_img.exists():
-                    with open(ctx_img, "rb") as f:
-                        b64_data = b64mod.b64encode(f.read()).decode()
-                    ext = ctx_img.suffix.lower().lstrip(".")
-                    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(ext, "image/png")
-                    content.append({"type": "input_text", "text": f"[Previous confirmed shot: {ctx_id}]"})
-                    content.append({"type": "input_image", "image_url": f"data:{mime};base64,{b64_data}"})
+                    context_images.append((ctx_id, ctx_img))
                     context_description_parts.append(f"{ctx_id} (confirmed)")
 
-            # Add current shot — native video upload for video, single image for keyframe
-            if media_type == "video":
-                content.append({"type": "input_text", "text": f"[Current shot being evaluated: {shot_id} (video)]"})
-                try:
-                    # Upload video via Files API (purpose=user_data), then reference by file_id
-                    import time as _time
-                    with open(current_file, "rb") as f:
-                        file_obj = client.files.create(file=f, purpose="user_data")
-                    # Wait for file processing to complete
-                    for _ in range(30):  # up to 60 seconds
-                        file_status = client.files.retrieve(file_obj.id)
-                        if hasattr(file_status, 'status') and file_status.status != "processing":
-                            break
-                        _time.sleep(2)
-                    content.append({"type": "input_video", "file_id": file_obj.id})
-                    print(f"{Colors.DIM}  Using native video input (file_id: {file_obj.id}){Colors.ENDC}")
-                except Exception as e:
-                    # Fallback: extract keyframes and send as images
-                    print(f"{Colors.DIM}  Native video upload failed ({e}), falling back to keyframes{Colors.ENDC}")
-                    from core.vision.base import BaseVision
-                    frames = BaseVision.extract_frames(current_file, num_frames=6)
-                    content[-1] = {"type": "input_text", "text": f"[Current shot: {shot_id} — {len(frames)} keyframes from video]"}
-                    for frame_path in frames:
-                        with open(frame_path, "rb") as f:
-                            b64_data = b64mod.b64encode(f.read()).decode()
-                        content.append({"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64_data}"})
-            else:
-                # Single keyframe image
-                with open(current_file, "rb") as f:
-                    b64_data = b64mod.b64encode(f.read()).decode()
-                ext = current_file.suffix.lower().lstrip(".")
-                mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(ext, "image/png")
-                content.append({"type": "input_text", "text": f"[Current shot being evaluated: {shot_id}]"})
-                content.append({"type": "input_image", "image_url": f"data:{mime};base64,{b64_data}"})
-
-            # Build context description
             if context_description_parts:
                 context_description = f"Previous confirmed shots in sequence: {', '.join(context_description_parts)}. Images provided above."
             else:
                 context_description = "This is the first shot in the sequence — no previous context."
 
-            # Format and append the evaluation prompt
+            # Format the evaluation prompt
             eval_prompt = _MURCH_EVAL_PROMPT.format(
                 shot_id=shot_id,
                 media_type=media_type,
@@ -1237,32 +1205,12 @@ class VideoDirector:
                 story_context=story_context,
                 context_description=context_description,
             )
-            content.append({"type": "input_text", "text": eval_prompt})
 
-            # Call Doubao Seed 2.0 Lite via Responses API
-            response = client.responses.create(
-                model=eval_model,
-                input=[{"role": "user", "content": content}],
-            )
-
-            # Extract text from Responses API output
-            result = ""
-            # Preferred: output_text is a convenience property on the Response object
-            if hasattr(response, "output_text") and response.output_text:
-                result = response.output_text
-            elif hasattr(response, "output") and response.output:
-                for item in response.output:
-                    if hasattr(item, "content") and item.content:
-                        for part in item.content:
-                            if hasattr(part, "text"):
-                                result += part.text
-                    elif hasattr(item, "text"):
-                        result += item.text
-            if not result and hasattr(response, "choices") and response.choices:
-                # Fallback for chat.completions-style response
-                result = response.choices[0].message.content
-            if not result:
-                result = str(response)
+            # Route to image or video analysis via the shared vision model (Chat Completions API)
+            if media_type == "video":
+                result = asyncio.run(self._vision.analyze_video(current_file, eval_prompt))
+            else:
+                result = asyncio.run(self._vision.analyze_image(current_file, eval_prompt))
 
             # Parse verdict from result
             verdict = "UNKNOWN"
@@ -2458,6 +2406,102 @@ class VideoDirector:
             return "(none)"
         return ", ".join(f.name for f in files)
 
+    def _trigger_memory_save(self):
+        """Silently ask the agent to persist anything learned this session."""
+        user_turns = sum(1 for m in self.messages if m.get("role") == "user")
+        if user_turns < 2:
+            return  # Too short to have learned anything useful
+
+        print(f"  {Colors.DIM}[Memory] Saving session insights...{Colors.ENDC}")
+
+        memory_prompt = (
+            "[SESSION END — INTERNAL] "
+            "Review this conversation and update persistent memory if anything is worth saving. "
+            "Call memory_read() to load current MEMORY.md, then memory_write() to save new "
+            "user preferences, aesthetic corrections, project outcomes, or terminology. "
+            "If nothing is worth saving, respond with just 'done'."
+        )
+
+        try:
+            if self.protocol == "anthropic":
+                self._memory_save_anthropic(memory_prompt)
+            else:
+                self._memory_save_openai(memory_prompt)
+            print(f"  {Colors.DIM}[Memory] Done{Colors.ENDC}")
+        except Exception:
+            pass  # Never block exit due to memory save failure
+
+    def _memory_save_anthropic(self, prompt: str):
+        """Non-streaming Anthropic call for silent memory save."""
+        # Use a separate message list so we don't pollute the main conversation
+        save_messages = list(self.messages)
+        save_messages.append({"role": "user", "content": prompt})
+
+        # Only expose memory tools
+        memory_tools = [t for t in TOOLS_ANTHROPIC if t["name"] in ("memory_read", "memory_write")]
+
+        for _ in range(5):  # max tool-call rounds
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                system=self._get_system_prompt(),
+                messages=save_messages,
+                tools=memory_tools,
+            )
+
+            if response.stop_reason != "tool_use":
+                break
+
+            # Execute tool calls silently
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    result = self.handle_tool(block.name, block.input)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    })
+
+            save_messages.append({"role": "assistant", "content": response.content})
+            save_messages.append({"role": "user", "content": tool_results})
+
+    def _memory_save_openai(self, prompt: str):
+        """Non-streaming OpenAI call for silent memory save."""
+        save_messages = [
+            {"role": "system", "content": self._get_system_prompt()},
+            *self.messages,
+            {"role": "user", "content": prompt},
+        ]
+
+        memory_tools = [
+            t for t in _tools_to_openai(TOOLS_ANTHROPIC)
+            if t["function"]["name"] in ("memory_read", "memory_write")
+        ]
+
+        for _ in range(5):
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=2048,
+                messages=save_messages,
+                tools=memory_tools,
+            )
+
+            choice = response.choices[0]
+            if choice.finish_reason != "tool_calls" or not choice.message.tool_calls:
+                break
+
+            save_messages.append(choice.message)
+            for tc in choice.message.tool_calls:
+                import json as _json
+                args = _json.loads(tc.function.arguments) if tc.function.arguments else {}
+                result = self.handle_tool(tc.function.name, args)
+                save_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                })
+
     # ── Conversation engine — Anthropic protocol ─────────────────
 
     def _send_anthropic(self, user_content: str | list | None, *, watcher: InputWatcher | None = None):
@@ -3544,6 +3588,9 @@ class VideoDirector:
                     continue
 
                 self._send_user_input(user_input)
+
+            # Session ended — persist any learned preferences before cleanup
+            self._trigger_memory_save()
         finally:
             _split_terminal.exit()
 

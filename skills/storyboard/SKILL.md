@@ -90,11 +90,20 @@ Avoid:
 - **3-5 seconds optimal** — Current AI models work best at this duration
 - **Trim aggressively** — A 5s clip often yields only 1-2s of good footage
 
+## Duration Planning (API-Aware)
+
+Seedance 2: **4–15s** (any integer). Seedance 1.x: **5s** or **10s** only.
+
+**Planning rules:**
+- Use the exact duration needed — don't pad unnecessarily.
+- If two adjacent short shots (e.g., 2s + 3s) can be combined into one 5s shot with a single action arc, merge them.
+- **Audio must complete within duration** — Seedance generates audio with video. Dialogue and narration in `video_prompt` must finish within the shot's duration. Don't write a 7-second sentence for a 5-second shot. Split long dialogue at natural pauses across shots.
+
 ## Duration & Rhythm
 
-- Hook shots: 1-3s
-- Action: 1-2s quick cuts
-- Mood: 2-3s establishing shots
-- Climax: 4-6s (let it breathe)
+- Hook shots: 4-5s (trim to the best moment)
+- Action: 4-5s quick cuts
+- Mood: 5-7s establishing shots
+- Climax: 8-12s (let it breathe)
 - Quiet before climax amplifies impact
 - Vary the pace: fast → slow → fast → slower
